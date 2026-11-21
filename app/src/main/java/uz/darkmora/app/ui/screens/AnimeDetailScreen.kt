@@ -4,7 +4,6 @@ import android.util.Base64
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -18,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -92,23 +90,22 @@ fun AnimeDetailScreen(
                 ShimmerBox(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(300.dp),
+                        .height(310.dp),
                     cornerRadius = 0.dp
                 )
                 Column(
-                    modifier = Modifier.padding(16.dp),
+                    modifier = Modifier.padding(18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.7f).height(28.dp), cornerRadius = 8.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.5f).height(20.dp), cornerRadius = 8.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(90.dp), cornerRadius = 12.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), cornerRadius = 14.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.7f).height(28.dp), cornerRadius = 10.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.5f).height(20.dp), cornerRadius = 10.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(95.dp), cornerRadius = 18.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), cornerRadius = 50.dp)
                 }
             }
         } else if (anime != null) {
             val a = anime!!
 
-            // Episode chunks if more than 30 episodes
             val chunkSize = 30
             val chunks = remember(episodes) { episodes.chunked(chunkSize) }
             var selectedChunkIndex by remember { mutableIntStateOf(0) }
@@ -118,12 +115,11 @@ fun AnimeDetailScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 90.dp)
             ) {
-                // Backdrop Header
                 item {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(320.dp)
+                            .height(325.dp)
                     ) {
                         AsyncImage(
                             model = a.banner ?: a.displayPoster(),
@@ -138,21 +134,21 @@ fun AnimeDetailScreen(
                                 .background(
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color(0x8808090E),
-                                            Color(0x4408090E),
-                                            Color(0xCC08090E),
+                                            Color(0x660A0B10),
+                                            Color(0x330A0B10),
+                                            Color(0xCC0A0B10),
                                             BgDark
                                         )
                                     )
                                 )
                         )
 
-                        // Top Action Buttons (Back & Favorite)
+                        // Clean Top Action Buttons
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .statusBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                                .padding(horizontal = 18.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -161,8 +157,8 @@ fun AnimeDetailScreen(
                                     .size(42.dp)
                                     .bounceClick(onClick = onBackClick)
                                     .clip(CircleShape)
-                                    .background(Color(0xBF0D111E))
-                                    .border(1.dp, Color(0x33FFFFFF), CircleShape),
+                                    .background(Color(0xBF11131C))
+                                    .border(0.8.dp, Color(0x22FFFFFF), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.ArrowBack, contentDescription = "Orqaga", tint = Color.White, modifier = Modifier.size(20.dp))
@@ -177,26 +173,26 @@ fun AnimeDetailScreen(
                                         Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                                     }
                                     .clip(CircleShape)
-                                    .background(if (isFavorite) Color(0x3338BDF8) else Color(0xBF0D111E))
-                                    .border(1.dp, if (isFavorite) PrimaryGlow else Color(0x33FFFFFF), CircleShape),
+                                    .background(if (isFavorite) Color.White else Color(0xBF11131C))
+                                    .border(0.8.dp, if (isFavorite) Color.White else Color(0x22FFFFFF), CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                                     contentDescription = "Sevimlilar",
-                                    tint = if (isFavorite) PrimaryGlow else Color.White,
+                                    tint = if (isFavorite) BgDark else Color.White,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
 
-                        // Poster + Meta overlay at bottom of header
+                        // Poster + Meta overlay
                         Row(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                .padding(horizontal = 18.dp),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.Bottom
                         ) {
                             AsyncImage(
@@ -204,11 +200,10 @@ fun AnimeDetailScreen(
                                 contentDescription = a.displayTitle(),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .width(105.dp)
-                                    .height(150.dp)
-                                    .shadow(16.dp, RoundedCornerShape(16.dp))
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(16.dp))
+                                    .width(106.dp)
+                                    .height(152.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .border(0.8.dp, Color(0x28FFFFFF), RoundedCornerShape(18.dp))
                             )
 
                             Column(
@@ -221,7 +216,7 @@ fun AnimeDetailScreen(
                                     text = a.displayTitle(),
                                     color = TextPrimary,
                                     fontSize = 21.sp,
-                                    fontWeight = FontWeight.Black,
+                                    fontWeight = FontWeight.Bold,
                                     lineHeight = 26.sp
                                 )
 
@@ -231,10 +226,10 @@ fun AnimeDetailScreen(
                                 ) {
                                     Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0xFF14192B))
-                                            .border(1.dp, CardBorder, RoundedCornerShape(8.dp))
-                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            .clip(RoundedCornerShape(50))
+                                            .background(BgCard)
+                                            .border(0.8.dp, CardBorder, RoundedCornerShape(50))
+                                            .padding(horizontal = 9.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
@@ -245,7 +240,7 @@ fun AnimeDetailScreen(
                                     Text("•", color = TextDim, fontSize = 12.sp)
                                     Text(a.displayYear(), color = TextMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                     Text("•", color = TextDim, fontSize = 12.sp)
-                                    Text("${episodes.size} qism", color = PrimaryGlow, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("${episodes.size} qism", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                                 }
 
                                 val genres = a.displayGenres()
@@ -261,21 +256,20 @@ fun AnimeDetailScreen(
                     }
                 }
 
-                // Info & Main Play Button Section
                 item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .padding(horizontal = 18.dp, vertical = 16.dp)
                     ) {
-                        // Description Card
+                        // Clean Soft Description Card
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(18.dp))
                                 .background(BgSurface)
-                                .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
-                                .padding(14.dp)
+                                .border(0.8.dp, CardBorder, RoundedCornerShape(18.dp))
+                                .padding(16.dp)
                         ) {
                             Text(
                                 text = a.displayDescription(),
@@ -287,7 +281,7 @@ fun AnimeDetailScreen(
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // Play / Resume Episode Button
+                        // Clean White Pill Play / Resume Episode Button
                         if (episodes.isNotEmpty()) {
                             val targetEp = episodes.find { it.qism == lastWatchedEp } ?: episodes.first()
                             val buttonLabel = if (lastWatchedEp > 0) "${targetEp.qism}-Qismni Davom Ettirish" else "1-Qismni Boshlash"
@@ -296,30 +290,24 @@ fun AnimeDetailScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .bounceClick { launchEpisode(a, targetEp) }
-                                    .shadow(16.dp, RoundedCornerShape(16.dp), spotColor = PrimaryGlow)
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(
-                                        Brush.horizontalGradient(
-                                            colors = listOf(PrimaryBlue, Color(0xFF1D4ED8))
-                                        )
-                                    )
-                                    .border(1.dp, Color(0x6638BDF8), RoundedCornerShape(16.dp))
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White)
                                     .padding(vertical = 15.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(22.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = buttonLabel,
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.ExtraBold
+                                    color = BgDark,
+                                    fontSize = 15.5.sp,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(22.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -327,22 +315,21 @@ fun AnimeDetailScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Qismlar ro'yxati (${episodes.size})",
+                                text = "Qismlar (${episodes.size})",
                                 color = TextPrimary,
                                 fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold
+                                fontWeight = FontWeight.Bold
                             )
                             if (lastWatchedEp > 0) {
                                 Text(
                                     text = "Oxirgi: $lastWatchedEp-qism",
-                                    color = PrimaryGlow,
+                                    color = TextMuted,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
 
-                        // Range Chunks Filter if > 1 chunk
                         if (chunks.size > 1) {
                             Spacer(modifier = Modifier.height(10.dp))
                             LazyRow(
@@ -356,18 +343,18 @@ fun AnimeDetailScreen(
                                     Box(
                                         modifier = Modifier
                                             .bounceClick { selectedChunkIndex = idx }
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isSelected) PrimaryBlue else BgCard)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (isSelected) Color.White else BgCard)
                                             .border(
-                                                width = 1.dp,
-                                                color = if (isSelected) PrimaryGlow else CardBorder,
-                                                shape = RoundedCornerShape(10.dp)
+                                                width = 0.8.dp,
+                                                color = if (isSelected) Color.White else CardBorder,
+                                                shape = RoundedCornerShape(50)
                                             )
-                                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                                            .padding(horizontal = 16.dp, vertical = 7.dp)
                                     ) {
                                         Text(
                                             text = "$firstNum - $lastNum",
-                                            color = if (isSelected) Color.White else TextMuted,
+                                            color = if (isSelected) BgDark else TextMuted,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -380,20 +367,20 @@ fun AnimeDetailScreen(
                     }
                 }
 
-                // Episodes List
+                // Clean Minimalist Episodes List
                 items(visibleEpisodes) { ep ->
                     val isLastWatched = ep.qism == lastWatchedEp
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .padding(horizontal = 18.dp, vertical = 4.5.dp)
                             .bounceClick { launchEpisode(a, ep) }
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isLastWatched) Color(0xFF17223B) else BgCard)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(if (isLastWatched) Color(0xFF1C2030) else BgCard)
                             .border(
-                                width = 1.dp,
-                                color = if (isLastWatched) PrimaryGlow else CardBorder,
-                                shape = RoundedCornerShape(14.dp)
+                                width = 0.8.dp,
+                                color = if (isLastWatched) Color(0x44FFFFFF) else CardBorder,
+                                shape = RoundedCornerShape(18.dp)
                             )
                             .padding(horizontal = 16.dp, vertical = 13.dp)
                     ) {
@@ -410,14 +397,14 @@ fun AnimeDetailScreen(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(if (isLastWatched) PrimaryBlue else Color(0x332563EB)),
+                                        .background(if (isLastWatched) Color.White else BgSurface),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = null,
-                                        tint = if (isLastWatched) Color.White else PrimaryGlow,
-                                        modifier = Modifier.size(19.dp)
+                                        tint = if (isLastWatched) BgDark else Color.White,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                                 Column {
@@ -425,11 +412,11 @@ fun AnimeDetailScreen(
                                         text = "${ep.qism}-qism",
                                         color = TextPrimary,
                                         fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        text = if (isLastWatched) "Oxirgi ko'rilgan qism" else a.displayTitle(),
-                                        color = if (isLastWatched) PrimaryGlow else TextDim,
+                                        text = if (isLastWatched) "Oxirgi ko'rilgan" else a.displayTitle(),
+                                        color = if (isLastWatched) TextMuted else TextDim,
                                         fontSize = 11.sp
                                     )
                                 }
@@ -440,15 +427,15 @@ fun AnimeDetailScreen(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    text = if (isLastWatched) "Davom etish" else "Tomosha",
-                                    color = if (isLastWatched) PrimaryGlow else PrimaryBlue,
+                                    text = if (isLastWatched) "Davom etish" else "Ko'rish",
+                                    color = if (isLastWatched) Color.White else TextMuted,
                                     fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.SemiBold
                                 )
                                 Icon(
                                     imageVector = Icons.Default.ChevronRight,
                                     contentDescription = null,
-                                    tint = if (isLastWatched) PrimaryGlow else PrimaryBlue,
+                                    tint = if (isLastWatched) Color.White else TextMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }

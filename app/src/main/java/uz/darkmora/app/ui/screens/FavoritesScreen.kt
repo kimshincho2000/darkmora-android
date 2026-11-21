@@ -9,7 +9,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -41,7 +41,6 @@ fun FavoritesScreen(
     val sessionManager = remember { UserSessionManager(context) }
     var favoriteList by remember { mutableStateOf(sessionManager.getFavoriteAnimes()) }
 
-    // Refresh whenever screen enters composition or favorites change
     LaunchedEffect(Unit) {
         val stored = sessionManager.getFavoriteAnimes()
         if (stored.isNotEmpty()) {
@@ -67,7 +66,7 @@ fun FavoritesScreen(
             .fillMaxSize()
             .background(BgDark)
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(horizontal = 18.dp, vertical = 16.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -75,24 +74,24 @@ fun FavoritesScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Sevimlilar Ro'yxati",
+                text = "Sevimlilar",
                 color = TextPrimary,
                 fontSize = 23.sp,
-                fontWeight = FontWeight.Black
+                fontWeight = FontWeight.Bold
             )
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(Color(0x2238BDF8))
-                    .border(1.dp, Color(0x4438BDF8), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(BgCard)
+                    .border(0.8.dp, CardBorder, RoundedCornerShape(50))
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
             ) {
                 Text(
                     text = "${favoriteList.size} ta",
-                    color = PrimaryGlow,
+                    color = Color.White,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }
@@ -103,7 +102,7 @@ fun FavoritesScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 80.dp),
+                    .padding(bottom = 90.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -113,21 +112,21 @@ fun FavoritesScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(76.dp)
+                            .size(72.dp)
                             .clip(CircleShape)
-                            .background(Color(0x1A38BDF8))
-                            .border(1.dp, Color(0x3338BDF8), CircleShape),
+                            .background(BgCard)
+                            .border(0.8.dp, CardBorder, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Bookmark,
+                            imageVector = Icons.Default.BookmarkBorder,
                             contentDescription = null,
-                            tint = PrimaryGlow,
-                            modifier = Modifier.size(36.dp)
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                     Text(
-                        text = "Hozircha sevimlilar ro'yxati bo'sh",
+                        text = "Sevimlilar ro'yxati bo'sh",
                         color = Color.White,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
@@ -139,15 +138,15 @@ fun FavoritesScreen(
                         textAlign = TextAlign.Center,
                         lineHeight = 19.sp
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Button(
                         onClick = onExploreClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                        shape = RoundedCornerShape(14.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Icon(Icons.Default.Explore, contentDescription = null, tint = Color.White)
+                        Icon(Icons.Default.Explore, contentDescription = null, tint = BgDark)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Katalogga o'tish", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Katalogga o'tish", color = BgDark, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -156,7 +155,7 @@ fun FavoritesScreen(
                 columns = GridCells.Fixed(2),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                contentPadding = PaddingValues(bottom = 105.dp),
+                contentPadding = PaddingValues(bottom = 115.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(favoriteList) { anime ->
@@ -164,7 +163,7 @@ fun FavoritesScreen(
                         anime = anime,
                         onClick = { onAnimeClick(anime.getEffectiveSlug()) },
                         width = 170,
-                        height = 240
+                        height = 238
                     )
                 }
             }

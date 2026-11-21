@@ -288,7 +288,7 @@ fun ProfileScreen(
                 )
                 QuickStatCard(
                     title = "Versiya",
-                    value = "v2.2.0",
+                    value = "v2.3.0",
                     icon = Icons.Default.Info,
                     modifier = Modifier.weight(1f),
                     onClick = {}
@@ -319,11 +319,11 @@ fun ProfileScreen(
                         try {
                             val res = DarkmoraApi.checkUpdate()
                             if (res.ok && res.data != null) {
-                                if (res.data.versionCode > 13) {
+                                if (res.data.versionCode > 14) {
                                     updateInfo = res.data
                                     showUpdateDialog = true
                                 } else {
-                                    Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.2.0)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.3.0)", Toast.LENGTH_SHORT).show()
                                 }
                             } else {
                                 Toast.makeText(context, "Versiya tekshirishda xatolik yuz berdi", Toast.LENGTH_SHORT).show()

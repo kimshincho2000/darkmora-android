@@ -2,7 +2,6 @@ package uz.darkmora.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -29,6 +28,8 @@ import kotlinx.coroutines.launch
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.components.AnimeCard
+import uz.darkmora.app.ui.components.ShimmerBox
+import uz.darkmora.app.ui.components.bounceClick
 import uz.darkmora.app.ui.theme.*
 
 @Composable
@@ -74,22 +75,24 @@ fun CatalogScreen(
             .background(BgDark)
             .statusBarsPadding()
     ) {
-        // Search Input Bar
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Clean Pill Search Bar
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .padding(horizontal = 18.dp, vertical = 8.dp)
+                .clip(RoundedCornerShape(50))
                 .background(BgSurface)
-                .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
-                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .border(0.8.dp, CardBorder, RoundedCornerShape(50))
+                .padding(horizontal = 16.dp, vertical = 2.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted)
-                Spacer(modifier = Modifier.width(8.dp))
+                Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(6.dp))
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
@@ -109,15 +112,15 @@ fun CatalogScreen(
                 )
                 if (searchQuery.isNotEmpty()) {
                     IconButton(onClick = { searchQuery = ""; loadCatalog() }) {
-                        Icon(Icons.Default.Close, contentDescription = null, tint = TextMuted)
+                        Icon(Icons.Default.Close, contentDescription = null, tint = TextMuted, modifier = Modifier.size(18.dp))
                     }
                 }
             }
         }
 
-        // Genre Filter Chips
+        // Minimalist High-Contrast Genre Chips
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(vertical = 6.dp)
         ) {
@@ -125,17 +128,17 @@ fun CatalogScreen(
                 val isSelected = (genre == "Barchasi" && selectedGenre.isEmpty()) || genre == selectedGenre
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isSelected) PrimaryBlue else BgCard)
-                        .border(1.dp, if (isSelected) PrimaryGlow else CardBorder, RoundedCornerShape(10.dp))
-                        .clickable {
+                        .bounceClick {
                             selectedGenre = if (genre == "Barchasi") "" else genre
                         }
-                        .padding(horizontal = 14.dp, vertical = 7.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isSelected) Color.White else BgCard)
+                        .border(0.8.dp, if (isSelected) Color.White else CardBorder, RoundedCornerShape(50))
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Text(
                         text = genre.replaceFirstChar { it.uppercase() },
-                        color = if (isSelected) Color.White else TextMuted,
+                        color = if (isSelected) BgDark else TextMuted,
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
@@ -145,17 +148,29 @@ fun CatalogScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Grid Content
         if (isLoading) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = PrimaryBlue)
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 115.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(6) {
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(235.dp),
+                        cornerRadius = 20.dp
+                    )
+                }
             }
         } else if (animes.isNotEmpty()) {
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 90.dp),
+                contentPadding = PaddingValues(start = 18.dp, end = 18.dp, bottom = 115.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(animes) { anime ->
@@ -163,7 +178,7 @@ fun CatalogScreen(
                         anime = anime,
                         onClick = { onAnimeClick(anime.getEffectiveSlug()) },
                         width = 170,
-                        height = 240
+                        height = 238
                     )
                 }
             }

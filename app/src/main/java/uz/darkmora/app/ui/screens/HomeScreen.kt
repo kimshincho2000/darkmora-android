@@ -17,7 +17,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -72,37 +71,36 @@ fun HomeScreen(
             .background(BgDark)
     ) {
         if (isLoading) {
-            // Shimmer Skeleton Loading UI
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = 100.dp)
+                    .padding(bottom = 110.dp)
             ) {
                 ShimmerBox(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(360.dp),
+                        .height(370.dp),
                     cornerRadius = 0.dp
                 )
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(22.dp))
                 ShimmerBox(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .width(190.dp)
+                        .padding(horizontal = 18.dp)
+                        .width(180.dp)
                         .height(22.dp),
-                    cornerRadius = 8.dp
+                    cornerRadius = 10.dp
                 )
                 Spacer(modifier = Modifier.height(14.dp))
                 Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     repeat(3) {
                         ShimmerBox(
                             modifier = Modifier
-                                .width(148.dp)
-                                .height(214.dp),
-                            cornerRadius = 18.dp
+                                .width(152.dp)
+                                .height(218.dp),
+                            cornerRadius = 20.dp
                         )
                     }
                 }
@@ -113,9 +111,8 @@ fun HomeScreen(
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 105.dp)
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
-                // Hero Carousel Banner
                 if (featuredList.isNotEmpty()) {
                     item {
                         HeroCarousel(
@@ -125,13 +122,12 @@ fun HomeScreen(
                     }
                 }
 
-                // Trending Row
                 val trending = data.trending ?: emptyList()
                 if (trending.isNotEmpty()) {
                     item {
-                        SectionHeader(title = "Trenddagi Animelar 🔥", onSeeAllClick = onSeeAllClick)
+                        SectionHeader(title = "Trenddagi Animelar", onSeeAllClick = onSeeAllClick)
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(trending) { anime ->
@@ -144,14 +140,13 @@ fun HomeScreen(
                     }
                 }
 
-                // Latest Episodes Row
                 val latest = data.latestEpisodes ?: data.latest ?: emptyList()
                 if (latest.isNotEmpty()) {
                     item {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        SectionHeader(title = "Yangi Qismlar ⚡", onSeeAllClick = onSeeAllClick)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        SectionHeader(title = "Yangi Qismlar", onSeeAllClick = onSeeAllClick)
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(latest) { anime ->
@@ -164,14 +159,13 @@ fun HomeScreen(
                     }
                 }
 
-                // Top Rated Row
                 val topRated = data.topRated ?: data.top ?: emptyList()
                 if (topRated.isNotEmpty()) {
                     item {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        SectionHeader(title = "Eng Yuqori Reyting 👑", onSeeAllClick = onSeeAllClick)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        SectionHeader(title = "Yuqori Reyting", onSeeAllClick = onSeeAllClick)
                         LazyRow(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             items(topRated) { anime ->
@@ -193,58 +187,50 @@ fun HomeScreen(
                     Text(text = "Server bilan aloqa o'rnatilmadi", color = TextMuted, fontSize = 14.sp)
                     Button(
                         onClick = { fetchHome() },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        shape = RoundedCornerShape(50)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = BgDark)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Qayta urinish", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Qayta urinish", color = BgDark, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
 
-        // Floating Liquid Glass Top Header Bar
+        // Clean Minimalist Top Bar
         Row(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 18.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Brand Logo Pill
             Row(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xB30B0E1A))
-                    .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xBF11131C))
+                    .border(0.8.dp, Color(0x1FFFFFFF), RoundedCornerShape(50))
                     .padding(horizontal = 14.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
+                        .size(7.dp)
                         .clip(CircleShape)
-                        .background(PrimaryGlow)
+                        .background(Color.White)
                 )
                 Text(
-                    text = "DARK",
+                    text = "DarkMora",
                     color = Color.White,
                     fontSize = 15.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = "MORA",
-                    color = PrimaryGlow,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Black
+                    fontWeight = FontWeight.Bold
                 )
             }
 
-            // Right Action Buttons (Search & Profile)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -254,8 +240,8 @@ fun HomeScreen(
                         .size(38.dp)
                         .bounceClick(onClick = onSeeAllClick)
                         .clip(CircleShape)
-                        .background(Color(0xB30B0E1A))
-                        .border(1.dp, Color(0x33FFFFFF), CircleShape),
+                        .background(Color(0xBF11131C))
+                        .border(0.8.dp, Color(0x1FFFFFFF), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Qidirish", tint = Color.White, modifier = Modifier.size(18.dp))
@@ -266,8 +252,8 @@ fun HomeScreen(
                         .size(38.dp)
                         .bounceClick(onClick = onProfileClick)
                         .clip(CircleShape)
-                        .background(Color(0xB30B0E1A))
-                        .border(1.dp, PrimaryGlow.copy(alpha = 0.6f), CircleShape),
+                        .background(Color(0xBF11131C))
+                        .border(0.8.dp, Color(0x28FFFFFF), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     if (!user?.photoUrl.isNullOrBlank()) {
@@ -278,7 +264,7 @@ fun HomeScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
-                        Icon(Icons.Default.Person, contentDescription = "Profil", tint = PrimaryGlow, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Person, contentDescription = "Profil", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
             }

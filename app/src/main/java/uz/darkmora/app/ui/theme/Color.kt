@@ -2,13 +2,13 @@ package uz.darkmora.app.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val BgDark = Color(0xFF08090E)
-val BgSurface = Color(0xFF0F121C)
-val BgCard = Color(0xFF151928)
-val CardBorder = Color(0x1FFFFFFF)
+val BgDark = Color(0xFF0A0B10)
+val BgSurface = Color(0xFF11131C)
+val BgCard = Color(0xFF161924)
+val CardBorder = Color(0x14FFFFFF)
 
-val PrimaryBlue = Color(0xFF2563EB)
-val PrimaryGlow = Color(0xFF38BDF8)
+val PrimaryBlue = Color(0xFF3B82F6)
+val PrimaryGlow = Color(0xFF60A5FA)
 val AccentViolet = Color(0xFF8B5CF6)
 val RatingGold = Color(0xFFFBBF24)
 
@@ -18,3 +18,8 @@ val TextDim = Color(0xFF64748B)
 
 val GreenOnline = Color(0xFF10B981)
 val RedBadge = Color(0xFFEF4444)
+
+val NavSurface = Color(0xFF161926)
+val NavActiveOrb = Color(0xFFFFFFFF)
+val NavActiveIcon = Color(0xFF0A0B10)
+val NavInactiveIcon = Color(0xFF737C94)
