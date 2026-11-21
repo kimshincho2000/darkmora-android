@@ -45,6 +45,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
+            "-opt-in=androidx.media3.common.util.UnstableApi"
+        )
     }
     buildFeatures {
         compose = true
