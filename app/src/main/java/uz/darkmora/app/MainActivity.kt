@@ -129,7 +129,7 @@ fun MainApp(
 
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 18) {
+            if (res.ok && res.data != null && res.data.versionCode > 19) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }
@@ -481,13 +481,13 @@ fun FluidCurvedBottomNav(
                     val rimColors = if (isDark) {
                         listOf(Color(0x18FFFFFF), Color(0x4560A5FA), Color(0x18FFFFFF))
                     } else {
-                        listOf(Color(0x14000000), Color(0x28000000), Color(0x14000000))
+                        listOf(Color(0x12000000), Color(0x22000000), Color(0x12000000))
                     }
 
                     drawPath(
                         path = topRimPath,
                         brush = Brush.horizontalGradient(colors = rimColors),
-                        style = Stroke(width = 1.1.dp.toPx())
+                        style = Stroke(width = 1.dp.toPx())
                     )
                 }
 
@@ -508,10 +508,10 @@ fun FluidCurvedBottomNav(
                             rotationZ = (rawContinuousPage - animatedPage) * -18f
                         }
                         .shadow(
-                            elevation = 14.dp,
+                            elevation = if (isDark) 14.dp else 6.dp,
                             shape = CircleShape,
-                            ambientColor = if (isDark) PrimaryGlow else Color.Black,
-                            spotColor = if (isDark) PrimaryBlue else Color.Black
+                            ambientColor = if (isDark) PrimaryGlow else Color(0x26000000),
+                            spotColor = if (isDark) PrimaryBlue else Color(0x33000000)
                         )
                         .clip(CircleShape)
                         .background(activeOrbColor)

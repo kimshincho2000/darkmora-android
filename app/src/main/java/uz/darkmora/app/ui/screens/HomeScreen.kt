@@ -101,17 +101,20 @@ fun HomeScreen(
                 .statusBarsPadding()
         ) {
             // ================================================================
-            // 1. TENSEII-STYLE MODERN TOP HEADER (Greeting + Theme + Bell + Avatar)
+            // 1. CLEAN PROPORTIONAL TOP HEADER (Greeting + Theme + Bell + Search + Avatar)
             // ================================================================
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Brand + Greeting Column
+                // Brand + Greeting Column (with weight(1f) so it never collides with icons)
                 Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -129,31 +132,35 @@ fun HomeScreen(
                             fontWeight = FontWeight.Black
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "DarkMora",
                             color = TextPrimary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (user != null) "Xush kelibsiz, ${user.getEffectiveName().substringBefore(" ")}" else "Anime olami • HD",
+                            text = if (user != null) "Salom, ${user.getEffectiveName().substringBefore(" ")}" else "Anime olami • Full HD",
                             color = TextMuted,
                             fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
                 // Right Utility Icons: [Theme Toggle] [Notifications Bell] [Search] [Avatar]
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Quick Day / Night Theme Switcher Pill
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .bounceClick {
                                 val nextDark = !AppThemeState.isDark
                                 AppThemeState.isDark = nextDark
@@ -168,14 +175,14 @@ fun HomeScreen(
                             imageVector = if (AppThemeState.isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
                             contentDescription = "Mavzu",
                             tint = if (AppThemeState.isDark) RatingGold else TextPrimary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
 
                     // Notifications Bell with Unread Red Badge
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .bounceClick {
                                 showNotificationsSheet = true
                             }
@@ -188,14 +195,14 @@ fun HomeScreen(
                             imageVector = Icons.Outlined.Notifications,
                             contentDescription = "Bildirishnomalar",
                             tint = TextPrimary,
-                            modifier = Modifier.size(19.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         if (unreadCount > 0) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .padding(top = 6.dp, end = 6.dp)
-                                    .size(8.dp)
+                                    .size(7.5.dp)
                                     .clip(CircleShape)
                                     .background(RedBadge)
                             )
@@ -205,7 +212,7 @@ fun HomeScreen(
                     // Search Button
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .bounceClick(onClick = onSeeAllClick)
                             .clip(CircleShape)
                             .background(BgCard)
@@ -216,14 +223,14 @@ fun HomeScreen(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Qidirish",
                             tint = TextPrimary,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                     }
 
                     // Profile Avatar Button
                     Box(
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(36.dp)
                             .bounceClick(onClick = onProfileClick)
                             .clip(CircleShape)
                             .background(BgCard)
@@ -242,7 +249,7 @@ fun HomeScreen(
                                 imageVector = Icons.Default.Person,
                                 contentDescription = "Profil",
                                 tint = TextPrimary,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(17.dp)
                             )
                         }
                     }

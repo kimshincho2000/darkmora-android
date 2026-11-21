@@ -536,22 +536,22 @@ fun HeroCarousel(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 8.dp),
+            .padding(top = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = 20.dp),
-            pageSpacing = 14.dp,
+            contentPadding = PaddingValues(horizontal = 18.dp),
+            pageSpacing = 12.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(340.dp)
+                .height(325.dp)
         ) { page ->
             val anime = items[page]
             val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(-1f, 1f)
             val absOffset = abs(pageOffset)
-            val cardScale = lerp(0.92f, 1f, 1f - absOffset)
-            val cardAlpha = lerp(0.65f, 1f, 1f - absOffset)
+            val cardScale = lerp(0.95f, 1f, 1f - absOffset)
+            val cardAlpha = lerp(0.75f, 1f, 1f - absOffset)
 
             Box(
                 modifier = Modifier
@@ -561,23 +561,17 @@ fun HeroCarousel(
                         scaleY = cardScale
                         alpha = cardAlpha
                     }
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(26.dp))
                     .background(BgCard)
-                    .border(1.dp, CardBorder, RoundedCornerShape(28.dp))
+                    .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
                     .clickable { onAnimeClick(anime.getEffectiveSlug()) }
             ) {
-                // Parallax Poster / Banner
+                // Full-Card Poster / Banner (No unclipped translationX so it never spills out of rounded card)
                 AsyncImage(
                     model = anime.banner ?: anime.displayPoster(),
                     contentDescription = anime.displayTitle(),
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            translationX = pageOffset * 45f
-                            scaleX = 1.06f
-                            scaleY = 1.06f
-                        }
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 // Smooth dark cinematic gradient inside the floating card
@@ -587,10 +581,10 @@ fun HeroCarousel(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x1A000000),
+                                    Color(0x22000000),
                                     Color(0x44000000),
-                                    Color(0xCC08090F),
-                                    Color(0xF208090F)
+                                    Color(0xD908090F),
+                                    Color(0xF508090F)
                                 )
                             )
                         )
@@ -600,7 +594,7 @@ fun HeroCarousel(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -608,7 +602,7 @@ fun HeroCarousel(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
                             .background(Color.White)
-                            .padding(horizontal = 11.dp, vertical = 4.5.dp)
+                            .padding(horizontal = 11.dp, vertical = 4.dp)
                     ) {
                         Text(
                             text = "TOP PREMYERA",
@@ -622,9 +616,9 @@ fun HeroCarousel(
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(Color(0xB312141E))
+                            .background(Color(0xBF12141E))
                             .border(0.8.dp, Color(0x28FFFFFF), RoundedCornerShape(50))
-                            .padding(horizontal = 10.dp, vertical = 4.5.dp),
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -640,8 +634,8 @@ fun HeroCarousel(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     val genres = anime.displayGenres()
                     if (genres.isNotEmpty()) {
@@ -658,22 +652,24 @@ fun HeroCarousel(
                     Text(
                         text = anime.displayTitle(),
                         color = Color.White,
-                        fontSize = 22.sp,
+                        fontSize = 21.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        lineHeight = 27.sp
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Action Buttons Row with Tenseii Shine Sweep
+                    // Action Buttons Row (Proportional width so both buttons fit cleanly inside card without clipping)
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
+                                .weight(1.25f)
+                                .height(42.dp)
                                 .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
                                 .clip(RoundedCornerShape(50))
                                 .background(Color.White)
@@ -681,46 +677,53 @@ fun HeroCarousel(
                                     Brush.linearGradient(
                                         colors = listOf(
                                             Color.Transparent,
-                                            Color(0x663B82F6),
+                                            Color(0x443B82F6),
                                             Color.Transparent
                                         ),
                                         start = Offset(shineOffset, 0f),
                                         end = Offset(shineOffset + 120f, 120f)
                                     )
-                                )
-                                .padding(horizontal = 22.dp, vertical = 10.dp)
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF0A0B10), modifier = Modifier.size(19.dp))
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF0A0B10), modifier = Modifier.size(18.dp))
                                 Text(
                                     text = "Tomosha qilish",
                                     color = Color(0xFF0A0B10),
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
                                 )
                             }
                         }
 
-                        Row(
+                        Box(
                             modifier = Modifier
+                                .weight(0.9f)
+                                .height(42.dp)
                                 .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
                                 .clip(RoundedCornerShape(50))
-                                .background(Color(0x991A1D2B))
-                                .border(0.8.dp, Color(0x28FFFFFF), RoundedCornerShape(50))
-                                .padding(horizontal = 15.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                .background(Color(0xBF1A1D2B))
+                                .border(0.8.dp, Color(0x33FFFFFF), RoundedCornerShape(50)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Text(
-                                text = "Batafsil",
-                                color = Color.White,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                Text(
+                                    text = "Batafsil",
+                                    color = Color.White,
+                                    fontSize = 12.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }

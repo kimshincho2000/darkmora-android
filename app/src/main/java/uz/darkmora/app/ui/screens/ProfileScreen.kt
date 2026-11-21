@@ -411,7 +411,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.ListAlt,
                 title = "About Us",
-                trailingText = "v2.5.1",
+                trailingText = "v2.5.2",
                 onClick = { showAboutDialog = true }
             )
             ProfileRowDivider()
@@ -463,7 +463,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.SystemUpdate,
                 title = "Check for Updates",
-                trailingText = if (isCheckingUpdate) "..." else "v2.5.1",
+                trailingText = if (isCheckingUpdate) "..." else "v2.5.2",
                 onClick = {
                     if (!isCheckingUpdate) {
                         isCheckingUpdate = true
@@ -471,11 +471,11 @@ fun ProfileScreen(
                             try {
                                 val res = DarkmoraApi.checkUpdate()
                                 if (res.ok && res.data != null) {
-                                    if (res.data.versionCode > 18) {
+                                    if (res.data.versionCode > 19) {
                                         updateInfo = res.data
                                         showUpdateDialog = true
                                     } else {
-                                        Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.5.1)", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.5.2)", Toast.LENGTH_SHORT).show()
                                     }
                                 } else {
                                     Toast.makeText(context, "Versiya tekshirishda xatolik", Toast.LENGTH_SHORT).show()
