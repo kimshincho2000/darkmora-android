@@ -1,16 +1,18 @@
 package uz.darkmora.app.ui.screens
 
+import android.util.Base64
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -21,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,10 +31,9 @@ import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
+import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.theme.*
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 
 @Composable
 fun AnimeDetailScreen(
@@ -39,9 +41,13 @@ fun AnimeDetailScreen(
     onBackClick: () -> Unit,
     onPlayEpisode: (String, String) -> Unit
 ) {
+    val context = LocalContext.current
+    val sessionManager = remember { UserSessionManager(context) }
+
     var anime by remember { mutableStateOf<Anime?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var isFavorite by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(slug) {
@@ -51,6 +57,9 @@ fun AnimeDetailScreen(
                 if (res.ok && res.data != null) {
                     anime = res.data.anime
                     episodes = res.data.episodes ?: emptyList()
+                    if (anime != null) {
+                        isFavorite = sessionManager.isFavorite(anime!!.id)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -73,7 +82,7 @@ fun AnimeDetailScreen(
             val a = anime!!
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                contentPadding = PaddingValues(bottom = 90.dp)
             ) {
                 // Backdrop Header
                 item {
@@ -103,16 +112,38 @@ fun AnimeDetailScreen(
                                 )
                         )
 
-                        // Back Button
-                        IconButton(
-                            onClick = onBackClick,
+                        // Top Action Buttons (Back & Favorite)
+                        Row(
                             modifier = Modifier
+                                .fillMaxWidth()
                                 .statusBarsPadding()
-                                .padding(8.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x8808090E))
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Orqaga", tint = Color.White)
+                            IconButton(
+                                onClick = onBackClick,
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(Color(0x8808090E))
+                            ) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "Orqaga", tint = Color.White)
+                            }
+
+                            IconButton(
+                                onClick = {
+                                    isFavorite = sessionManager.toggleFavorite(a.id)
+                                },
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(Color(0x8808090E))
+                            ) {
+                                Icon(
+                                    imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = "Sevimlilar",
+                                    tint = if (isFavorite) PrimaryGlow else Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -177,9 +208,11 @@ fun AnimeDetailScreen(
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(PrimaryBlue)
                                     .clickable {
-                                        val encodedUrl = URLEncoder.encode(firstEp.videoUrl ?: "", StandardCharsets.UTF_8.toString())
-                                        val encodedTitle = URLEncoder.encode("${a.displayTitle()} - 1-qism", StandardCharsets.UTF_8.toString())
-                                        onPlayEpisode(encodedUrl, encodedTitle)
+                                        val rawUrl = firstEp.videoUrl ?: firstEp.embedUrl ?: ""
+                                        val rawTitle = "${a.displayTitle()} - 1-qism"
+                                        val b64Url = Base64.encodeToString(rawUrl.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
+                                        val b64Title = Base64.encodeToString(rawTitle.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
+                                        onPlayEpisode(b64Url, b64Title)
                                     }
                                     .padding(vertical = 14.dp),
                                 horizontalArrangement = Arrangement.Center,
@@ -218,9 +251,11 @@ fun AnimeDetailScreen(
                             .background(BgCard)
                             .border(1.dp, CardBorder, RoundedCornerShape(12.dp))
                             .clickable {
-                                val encodedUrl = URLEncoder.encode(ep.videoUrl ?: "", StandardCharsets.UTF_8.toString())
-                                val encodedTitle = URLEncoder.encode("${a.displayTitle()} - ${ep.qism}-qism", StandardCharsets.UTF_8.toString())
-                                onPlayEpisode(encodedUrl, encodedTitle)
+                                val rawUrl = ep.videoUrl ?: ep.embedUrl ?: ""
+                                val rawTitle = "${a.displayTitle()} - ${ep.qism}-qism"
+                                val b64Url = Base64.encodeToString(rawUrl.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
+                                val b64Title = Base64.encodeToString(rawTitle.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
+                                onPlayEpisode(b64Url, b64Title)
                             }
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {

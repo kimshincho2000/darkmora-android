@@ -79,3 +79,71 @@ data class AnimeDetailData(
     val episodes: List<Episode>? = emptyList(),
     val similar: List<Anime>? = emptyList()
 )
+
+data class UserProfile(
+    val id: Any? = null,
+    @SerializedName("db_id") val dbId: Int? = null,
+    @SerializedName("user_code") val userCode: String? = null,
+    val username: String? = null,
+    @SerializedName("display_name") val displayName: String? = null,
+    val email: String? = null,
+    val phone: String? = null,
+    @SerializedName("photo_url") val photoUrl: String? = null,
+    @SerializedName("is_admin") val isAdmin: Boolean = false,
+    @SerializedName("is_owner") val isOwner: Boolean = false
+) {
+    fun getEffectiveName(): String = displayName?.takeIf { it.isNotBlank() } ?: username ?: "DarkMora Foydalanuvchisi"
+}
+
+data class AuthData(
+    val user: UserProfile? = null,
+    val token: String? = null,
+    val session: String? = null,
+    val msg: String? = null
+)
+
+data class AuthResponse(
+    val ok: Boolean,
+    val status: String? = null,
+    val error: String? = null,
+    val data: AuthData? = null
+)
+
+data class TgAuthInitData(
+    val token: String,
+    @SerializedName("bot_url") val botUrl: String,
+    @SerializedName("expires_in") val expiresIn: Int = 600
+)
+
+data class TgAuthInitResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val data: TgAuthInitData? = null
+)
+
+data class TgAuthPollResponse(
+    val ok: Boolean,
+    val status: String? = null,
+    val error: String? = null,
+    val data: AuthData? = null
+)
+
+data class UpdateInfo(
+    @SerializedName("version_code") val versionCode: Int,
+    @SerializedName("version_name") val versionName: String,
+    @SerializedName("apk_url") val apkUrl: String,
+    val changelog: String? = null,
+    @SerializedName("is_force") val isForce: Boolean = false
+)
+
+data class CheckUpdateResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val data: UpdateInfo? = null
+)
+
+data class BaseResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val message: String? = null
+)
