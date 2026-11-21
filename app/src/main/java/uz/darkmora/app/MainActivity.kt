@@ -2,9 +2,14 @@
 
 package uz.darkmora.app
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -51,6 +56,7 @@ import kotlinx.coroutines.launch
 import uz.darkmora.app.data.UpdateInfo
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
+import uz.darkmora.app.notifications.DarkmoraNotificationHelper
 import uz.darkmora.app.ui.components.IntroOverlay
 import uz.darkmora.app.ui.screens.*
 import uz.darkmora.app.ui.theme.*
@@ -59,36 +65,83 @@ import kotlin.math.cos
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    private var pendingTargetSlug by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sessionManager = UserSessionManager(this)
         AppThemeState.isDark = sessionManager.isDarkMode()
 
+        pendingTargetSlug = intent?.getStringExtra("target_anime_slug")
+        DarkmoraNotificationHelper.schedulePeriodicCheck(this)
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             DarkMoraTheme(isDarkTheme = AppThemeState.isDark) {
-                MainApp()
+                MainApp(
+                    initialTargetSlug = pendingTargetSlug,
+                    onTargetSlugConsumed = { pendingTargetSlug = null }
+                )
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        val slug = intent?.getStringExtra("target_anime_slug")
+        if (!slug.isNullOrBlank()) {
+            pendingTargetSlug = slug
         }
     }
 }
 
 @Composable
-fun MainApp() {
+fun MainApp(
+    initialTargetSlug: String? = null,
+    onTargetSlugConsumed: () -> Unit = {}
+) {
+    val context = LocalContext.current
     val navController = rememberNavController()
+    val scope = rememberCoroutineScope()
 
-    var showIntroOverlay by remember { mutableStateOf(true) }
+    var showIntroOverlay by remember { mutableStateOf(initialTargetSlug.isNullOrBlank()) }
     var autoUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var showAutoUpdateDialog by remember { mutableStateOf(false) }
 
+    val notifPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            scope.launch {
+                DarkmoraNotificationHelper.checkAndDispatchNewNotifications(context)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            !DarkmoraNotificationHelper.hasNotificationPermission(context)
+        ) {
+            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            DarkmoraNotificationHelper.checkAndDispatchNewNotifications(context)
+        }
+
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 17) {
+            if (res.ok && res.data != null && res.data.versionCode > 18) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }
         } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(initialTargetSlug) {
+        if (!initialTargetSlug.isNullOrBlank()) {
+            showIntroOverlay = false
+            navController.navigate("detail/$initialTargetSlug")
+            onTargetSlugConsumed()
+        }
     }
 
     Box(

@@ -40,6 +40,7 @@ import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.HomeData
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
+import uz.darkmora.app.notifications.DarkmoraNotificationHelper
 import uz.darkmora.app.ui.components.*
 import uz.darkmora.app.ui.theme.*
 
@@ -581,11 +582,16 @@ fun NotificationsDialog(
     onAnimeClick: (Anime) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
+    val sessionManager = remember { UserSessionManager(context) }
+    val scope = rememberCoroutineScope()
+    var pushEnabled by remember { mutableStateOf(sessionManager.isNotificationsEnabled()) }
+
     Dialog(onDismissRequest = onDismiss) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 520.dp)
+                .heightIn(max = 560.dp)
                 .clip(RoundedCornerShape(26.dp))
                 .background(BgSurface)
                 .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
@@ -624,7 +630,85 @@ fun NotificationsDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // System Push Notification Toggle + Instant Test Push Button
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(BgCard)
+                        .border(0.8.dp, CardBorder, RoundedCornerShape(16.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Yuqori panel bildirishnomasi",
+                            color = TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = if (pushEnabled) "Yangi qism chiqqanda telefon tepasidan keladi" else "O'chirilgan",
+                            color = TextMuted,
+                            fontSize = 11.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = pushEnabled,
+                        onCheckedChange = { enabled ->
+                            pushEnabled = enabled
+                            sessionManager.setNotificationsEnabled(enabled)
+                            if (enabled && notifications.isNotEmpty()) {
+                                scope.launch {
+                                    DarkmoraNotificationHelper.showEpisodeSystemNotification(
+                                        context = context,
+                                        anime = notifications.first(),
+                                        isTest = true
+                                    )
+                                }
+                            }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = PrimaryBlue
+                        )
+                    )
+                }
+
+                if (notifications.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(PrimaryBlue.copy(alpha = 0.12f))
+                            .border(0.8.dp, PrimaryBlue.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                            .clickable {
+                                scope.launch {
+                                    DarkmoraNotificationHelper.showEpisodeSystemNotification(
+                                        context = context,
+                                        anime = notifications.first(),
+                                        isTest = true
+                                    )
+                                }
+                            }
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "🔔 Telefon yuqori paneliga sinov bildirishnoma yuborish",
+                            color = PrimaryBlue,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
 
                 if (notifications.isEmpty()) {
                     Box(

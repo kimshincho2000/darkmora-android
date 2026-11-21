@@ -11,8 +11,8 @@ android {
         applicationId = "uz.darkmora.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 17
-        versionName = "2.5.0"
+        versionCode = 18
+        versionName = "2.5.1"
     }
 
     signingConfigs {
@@ -86,6 +86,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
-    // Local Storage DataStore
+    // Local Storage DataStore & Background WorkManager for Push Notifications
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
 }

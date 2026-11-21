@@ -155,4 +155,14 @@ class UserSessionManager(context: Context) {
         current.addAll(ids)
         prefs.edit().putStringSet("read_notif_ids", current.map { it.toString() }.toSet()).apply()
     }
+
+    fun getNotifiedSystemKeys(): Set<String> {
+        return prefs.getStringSet("system_notified_keys", emptySet()) ?: emptySet()
+    }
+
+    fun addNotifiedSystemKey(key: String) {
+        val current = getNotifiedSystemKeys().toMutableSet()
+        current.add(key)
+        prefs.edit().putStringSet("system_notified_keys", current).apply()
+    }
 }
