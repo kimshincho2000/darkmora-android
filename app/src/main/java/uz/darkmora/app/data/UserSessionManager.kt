@@ -3,6 +3,7 @@ package uz.darkmora.app.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 
 class UserSessionManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("darkmora_user_session", Context.MODE_PRIVATE)
@@ -47,10 +48,28 @@ class UserSessionManager(context: Context) {
             .apply()
     }
 
+    // --- FAVORITES (Stores both IDs and full Anime objects for instant display) ---
+
+    fun toggleFavoriteAnime(anime: Anime): Boolean {
+        val currentList = getFavoriteAnimes().toMutableList()
+        val existingIndex = currentList.indexOfFirst { it.id == anime.id }
+        val isAdded = if (existingIndex >= 0) {
+            currentList.removeAt(existingIndex)
+            false
+        } else {
+            currentList.add(0, anime)
+            true
+        }
+        saveFavoriteAnimesList(currentList)
+        return isAdded
+    }
+
     fun toggleFavorite(animeId: Int): Boolean {
         val favs = getFavorites().toMutableSet()
         val isAdded = if (favs.contains(animeId)) {
             favs.remove(animeId)
+            val list = getFavoriteAnimes().filter { it.id != animeId }
+            prefs.edit().putString("favorites_anime_json", gson.toJson(list)).apply()
             false
         } else {
             favs.add(animeId)
@@ -60,12 +79,41 @@ class UserSessionManager(context: Context) {
         return isAdded
     }
 
+    private fun saveFavoriteAnimesList(list: List<Anime>) {
+        val ids = list.map { it.id.toString() }.toSet()
+        prefs.edit()
+            .putString("favorites_anime_json", gson.toJson(list))
+            .putStringSet("favorites", ids)
+            .apply()
+    }
+
+    fun getFavoriteAnimes(): List<Anime> {
+        val json = prefs.getString("favorites_anime_json", null) ?: return emptyList()
+        return try {
+            val type = object : TypeToken<List<Anime>>() {}.type
+            gson.fromJson<List<Anime>>(json, type) ?: emptyList()
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     fun isFavorite(animeId: Int): Boolean {
-        return getFavorites().contains(animeId)
+        return getFavorites().contains(animeId) || getFavoriteAnimes().any { it.id == animeId }
     }
 
     fun getFavorites(): Set<Int> {
         val set = prefs.getStringSet("favorites", emptySet()) ?: emptySet()
-        return set.mapNotNull { it.toIntOrNull() }.toSet()
+        val fromObjects = getFavoriteAnimes().map { it.id }.toSet()
+        return set.mapNotNull { it.toIntOrNull() }.toSet() + fromObjects
+    }
+
+    // --- WATCH HISTORY ---
+
+    fun saveLastWatchedEpisode(slug: String, episodeNum: Int) {
+        prefs.edit().putInt("last_ep_$slug", episodeNum).apply()
+    }
+
+    fun getLastWatchedEpisode(slug: String): Int {
+        return prefs.getInt("last_ep_$slug", 0)
     }
 }

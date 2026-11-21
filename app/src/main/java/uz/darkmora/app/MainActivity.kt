@@ -5,6 +5,9 @@ package uz.darkmora.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -13,8 +16,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
@@ -26,26 +29,29 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
 import uz.darkmora.app.data.UpdateInfo
-import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.screens.*
 import uz.darkmora.app.ui.theme.*
+import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             DarkMoraTheme {
                 MainApp()
@@ -57,10 +63,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp() {
     val navController = rememberNavController()
-    val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = navBackStackEntry?.destination?.route
-
-    val isTopLevel = currentRoute == null || currentRoute == "main_tabs"
 
     var autoUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var showAutoUpdateDialog by remember { mutableStateOf(false) }
@@ -68,28 +70,27 @@ fun MainApp() {
     LaunchedEffect(Unit) {
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 12) {
+            if (res.ok && res.data != null && res.data.versionCode > 13) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }
         } catch (_: Exception) {}
     }
 
-    Scaffold(
-        containerColor = BgDark
-    ) { innerPadding ->
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgDark)
+    ) {
         NavHost(
             navController = navController,
             startDestination = "main_tabs",
-            modifier = Modifier.padding(innerPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
             composable("main_tabs") {
                 MainTabsScreen(
                     onAnimeClick = { slug ->
                         navController.navigate("detail/$slug")
-                    },
-                    onNavigateToCatalog = {
-                        // Handled via pager
                     }
                 )
             }
@@ -102,24 +103,36 @@ fun MainApp() {
                 AnimeDetailScreen(
                     slug = slug,
                     onBackClick = { navController.popBackStack() },
-                    onPlayEpisode = { b64Url, b64Title ->
-                        navController.navigate("player/$b64Url/$b64Title")
+                    onPlayEpisode = { b64Url, b64Title, animeSlug, epNum ->
+                        navController.navigate("player/$b64Url/$b64Title?slug=$animeSlug&ep=$epNum")
                     }
                 )
             }
 
             composable(
-                route = "player/{videoUrl}/{title}",
+                route = "player/{videoUrl}/{title}?slug={slug}&ep={ep}",
                 arguments = listOf(
                     navArgument("videoUrl") { type = NavType.StringType },
-                    navArgument("title") { type = NavType.StringType }
+                    navArgument("title") { type = NavType.StringType },
+                    navArgument("slug") {
+                        type = NavType.StringType
+                        defaultValue = ""
+                    },
+                    navArgument("ep") {
+                        type = NavType.IntType
+                        defaultValue = 1
+                    }
                 )
             ) { backStackEntry ->
                 val videoUrl = backStackEntry.arguments?.getString("videoUrl") ?: ""
                 val title = backStackEntry.arguments?.getString("title") ?: ""
+                val slug = backStackEntry.arguments?.getString("slug") ?: ""
+                val ep = backStackEntry.arguments?.getInt("ep") ?: 1
                 PlayerScreen(
                     videoUrlEncoded = videoUrl,
                     titleEncoded = title,
+                    slug = slug,
+                    initialEpisode = ep,
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -142,11 +155,8 @@ data class NavItem(val title: String, val icon: ImageVector)
 
 @Composable
 fun MainTabsScreen(
-    onAnimeClick: (String) -> Unit,
-    onNavigateToCatalog: () -> Unit
+    onAnimeClick: (String) -> Unit
 ) {
-    val context = LocalContext.current
-    val sessionManager = remember { UserSessionManager(context) }
     val scope = rememberCoroutineScope()
 
     val navItems = remember {
@@ -171,18 +181,20 @@ fun MainTabsScreen(
                     onAnimeClick = onAnimeClick,
                     onSeeAllClick = {
                         scope.launch { pagerState.animateScrollToPage(1) }
+                    },
+                    onProfileClick = {
+                        scope.launch { pagerState.animateScrollToPage(3) }
                     }
                 )
                 1 -> CatalogScreen(
                     onAnimeClick = onAnimeClick
                 )
-                2 -> {
-                    // Favorites screen with real user favorites
-                    FavoritesScreen(
-                        favorites = emptyList(),
-                        onAnimeClick = onAnimeClick
-                    )
-                }
+                2 -> FavoritesScreen(
+                    onAnimeClick = onAnimeClick,
+                    onExploreClick = {
+                        scope.launch { pagerState.animateScrollToPage(1) }
+                    }
+                )
                 3 -> ProfileScreen(
                     onNavigateToFavorites = {
                         scope.launch { pagerState.animateScrollToPage(2) }
@@ -191,17 +203,34 @@ fun MainTabsScreen(
             }
         }
 
+        // Bottom Vignette Gradient behind floating bar for readability
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(105.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color(0x9906080E),
+                            Color(0xE606080E)
+                        )
+                    )
+                )
+        )
+
         // iOS Telegram Liquid Glass Floating Bottom Navigation Bar
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
+                .padding(horizontal = 18.dp, vertical = 12.dp)
         ) {
             LiquidGlassBottomBar(
                 items = navItems,
-                selectedIndex = pagerState.currentPage,
+                pagerState = pagerState,
                 onItemSelected = { index ->
                     scope.launch {
                         pagerState.animateScrollToPage(index)
@@ -213,99 +242,135 @@ fun MainTabsScreen(
 }
 
 // ============================================================================
-// iOS TELEGRAM "LIQUID GLASS" FLOATING PILL COMPONENT
+// iOS TELEGRAM "LIQUID GLASS" FLOATING PILL WITH 1:1 CONTINUOUS SLIDING CAPSULE
 // ============================================================================
 
 @Composable
 fun LiquidGlassBottomBar(
     items: List<NavItem>,
-    selectedIndex: Int,
+    pagerState: PagerState,
     onItemSelected: (Int) -> Unit
 ) {
-    Box(
+    // Outer Floating Liquid Glass Container
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .clip(RoundedCornerShape(32.dp))
+            .height(68.dp)
+            .shadow(
+                elevation = 24.dp,
+                shape = RoundedCornerShape(34.dp),
+                ambientColor = Color.Black,
+                spotColor = PrimaryBlue
+            )
+            .clip(RoundedCornerShape(34.dp))
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xD9121626), // Frosted translucent obsidian
-                        Color(0xE60A0D17)
+                        Color(0xE614192B), // Frosted translucent obsidian top
+                        Color(0xF20A0D18)  // Deep obsidian bottom
                     )
                 )
             )
             .border(
-                width = 1.dp,
-                brush = Brush.verticalGradient(
+                width = 1.2.dp,
+                brush = Brush.linearGradient(
                     colors = listOf(
-                        Color(0x40FFFFFF), // Glossy top refraction highlight
-                        Color(0x15FFFFFF),
-                        Color(0x05FFFFFF)
+                        Color(0x55FFFFFF), // Specular top glass highlight
+                        Color(0x2838BDF8), // Subtle cyan refraction
+                        Color(0x12FFFFFF),
+                        Color(0x3338BDF8)
                     )
                 ),
-                shape = RoundedCornerShape(32.dp)
+                shape = RoundedCornerShape(34.dp)
             )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 6.dp, vertical = 6.dp)
     ) {
+        val tabCount = items.size
+        val tabWidth = maxWidth / tabCount
+
+        // Continuous page position (tracks finger swipe 1:1 in real time!)
+        val continuousPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
+            .coerceIn(0f, (tabCount - 1).toFloat())
+
+        val pillOffset by animateDpAsState(
+            targetValue = tabWidth * continuousPage,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessHigh
+            ),
+            label = "slidingPillOffset"
+        )
+
+        // 1. CONTINUOUS SLIDING LIQUID GLASS ACTIVE CAPSULE
+        Box(
+            modifier = Modifier
+                .offset(x = pillOffset)
+                .width(tabWidth)
+                .fillMaxHeight()
+                .padding(horizontal = 2.dp)
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0x4D2563EB),
+                            Color(0x2E38BDF8),
+                            Color(0x3B1D4ED8)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0x8838BDF8),
+                            Color(0x2238BDF8)
+                        )
+                    ),
+                    shape = RoundedCornerShape(28.dp)
+                )
+        )
+
+        // 2. TAB ITEMS ROW (Icons & Labels sit comfortably inside the 56dp inner height)
         Row(
             modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
             items.forEachIndexed { index, item ->
-                val selected = selectedIndex == index
-                val interactionSource = remember { MutableInteractionSource() }
+                val distance = abs(continuousPage - index)
+                val isSelected = pagerState.currentPage == index
 
-                // Animated scale/alpha
-                val pillAlpha by animateFloatAsState(
-                    targetValue = if (selected) 1f else 0f,
-                    animationSpec = spring(stiffness = 400f),
-                    label = "pillAlpha"
+                val iconScale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.15f else 1.0f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    ),
+                    label = "iconScale"
+                )
+
+                val iconColor by animateColorAsState(
+                    targetValue = if (distance < 0.5f) PrimaryGlow else Color(0xFF8E96AA),
+                    label = "iconColor"
+                )
+
+                val textColor by animateColorAsState(
+                    targetValue = if (distance < 0.5f) Color.White else Color(0xFF7B8398),
+                    label = "textColor"
                 )
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(24.dp))
+                        .clip(RoundedCornerShape(28.dp))
                         .clickable(
-                            interactionSource = interactionSource,
+                            interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) {
                             onItemSelected(index)
                         },
                     contentAlignment = Alignment.Center
                 ) {
-                    // Active Sliding Liquid Pill Behind the Icon
-                    if (pillAlpha > 0.05f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.85f)
-                                .height(38.dp)
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            Color(0x332563EB),
-                                            Color(0x223B82F6)
-                                        )
-                                    )
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(
-                                            Color(0x553B82F6),
-                                            Color(0x103B82F6)
-                                        )
-                                    ),
-                                    shape = RoundedCornerShape(20.dp)
-                                )
-                        )
-                    }
-
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
@@ -313,15 +378,22 @@ fun LiquidGlassBottomBar(
                         Icon(
                             imageVector = item.icon,
                             contentDescription = item.title,
-                            tint = if (selected) PrimaryGlow else Color(0xFF8E95A8),
-                            modifier = Modifier.size(22.dp)
+                            tint = iconColor,
+                            modifier = Modifier
+                                .size(22.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScale
+                                    scaleY = iconScale
+                                    translationY = if (isSelected) -2f else 0f
+                                }
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = item.title,
-                            color = if (selected) Color.White else Color(0xFF6B7280),
-                            fontSize = 10.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                            color = textColor,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            maxLines = 1
                         )
                     }
                 }
