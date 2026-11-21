@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -132,13 +132,13 @@ fun CatalogScreen(
                             selectedGenre = if (genre == "Barchasi") "" else genre
                         }
                         .clip(RoundedCornerShape(50))
-                        .background(if (isSelected) Color.White else BgCard)
-                        .border(0.8.dp, if (isSelected) Color.White else CardBorder, RoundedCornerShape(50))
+                        .background(if (isSelected) TextPrimary else BgCard)
+                        .border(0.8.dp, if (isSelected) TextPrimary else CardBorder, RoundedCornerShape(50))
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Text(
                         text = genre.replaceFirstChar { it.uppercase() },
-                        color = if (isSelected) BgDark else TextMuted,
+                        color = if (isSelected) BgSurface else TextMuted,
                         fontSize = 12.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                     )
@@ -173,9 +173,10 @@ fun CatalogScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(animes) { anime ->
+                itemsIndexed(animes) { index, anime ->
                     AnimeCard(
                         anime = anime,
+                        index = index,
                         onClick = { onAnimeClick(anime.getEffectiveSlug()) },
                         width = 170,
                         height = 238

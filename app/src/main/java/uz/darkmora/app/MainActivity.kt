@@ -17,7 +17,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.GridView
@@ -33,7 +32,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -41,6 +39,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -50,20 +49,24 @@ import androidx.navigation.compose.*
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
 import uz.darkmora.app.data.UpdateInfo
+import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
+import uz.darkmora.app.ui.components.IntroOverlay
 import uz.darkmora.app.ui.screens.*
 import uz.darkmora.app.ui.theme.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val sessionManager = UserSessionManager(this)
+        AppThemeState.isDark = sessionManager.isDarkMode()
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
-            DarkMoraTheme {
+            DarkMoraTheme(isDarkTheme = AppThemeState.isDark) {
                 MainApp()
             }
         }
@@ -74,13 +77,14 @@ class MainActivity : ComponentActivity() {
 fun MainApp() {
     val navController = rememberNavController()
 
+    var showIntroOverlay by remember { mutableStateOf(true) }
     var autoUpdateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var showAutoUpdateDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 16) {
+            if (res.ok && res.data != null && res.data.versionCode > 17) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }
@@ -148,6 +152,13 @@ fun MainApp() {
             }
         }
 
+        // Tenseii-style Animated Calligraphy Splash / Intro Overlay on App Launch
+        if (showIntroOverlay) {
+            IntroOverlay(
+                onFinished = { showIntroOverlay = false }
+            )
+        }
+
         if (showAutoUpdateDialog && autoUpdateInfo != null) {
             UpdateAppDialog(
                 info = autoUpdateInfo!!,
@@ -158,7 +169,7 @@ fun MainApp() {
 }
 
 // ============================================================================
-// MAIN TABS + FLUID CURVED LIQUID DROPLET BOTTOM NAVIGATION BAR (VIDEO REPLICA)
+// MAIN TABS + FLUID CURVED LIQUID DROPLET BOTTOM NAVIGATION BAR
 // ============================================================================
 
 data class NavItem(
@@ -185,7 +196,6 @@ fun MainTabsScreen(
     val pagerState = rememberPagerState(pageCount = { navItems.size })
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Ultra-smooth swipeable Horizontal Pager
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
@@ -232,7 +242,8 @@ fun MainTabsScreen(
                                 animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing)
                             )
                         }
-                    }
+                    },
+                    onAnimeClick = onAnimeClick
                 )
             }
         }
@@ -254,7 +265,7 @@ fun MainTabsScreen(
                 )
         )
 
-        // Fluid Curved Liquid Droplet Bottom Navigation Bar (1:1 Video Animation)
+        // Fluid Curved Liquid Droplet Bottom Navigation Bar (Adapts to Light & Dark themes!)
         FluidCurvedBottomNav(
             items = navItems,
             pagerState = pagerState,
@@ -271,10 +282,6 @@ fun MainTabsScreen(
     }
 }
 
-// ============================================================================
-// FLUID CURVED LIQUID DROPLET BOTTOM NAVIGATION (EXACT VIDEO ANIMATION)
-// ============================================================================
-
 @Composable
 fun FluidCurvedBottomNav(
     items: List<NavItem>,
@@ -284,12 +291,11 @@ fun FluidCurvedBottomNav(
 ) {
     val density = LocalDensity.current
     val tabCount = items.size
+    val isDark = AppThemeState.isDark
 
-    // Continuous page float: tracks finger drag or tab click transition smoothly from 0f to (N-1)f
     val rawContinuousPage = (pagerState.currentPage + pagerState.currentPageOffsetFraction)
         .coerceIn(0f, (tabCount - 1).toFloat())
 
-    // Buttery spring interpolation for the notch center position
     val animatedPage by animateFloatAsState(
         targetValue = rawContinuousPage,
         animationSpec = spring(
@@ -299,18 +305,19 @@ fun FluidCurvedBottomNav(
         label = "fluidNotchPage"
     )
 
-    // How far are we mid-transition between two integer tabs?
-    // 0f = settled exactly on a tab (deep concave cradle, floating orb popped up)
-    // 1f = halfway between two tabs (liquid droplet sinks into bar & morphs into a wave!)
     val nearestTab = animatedPage.roundToInt()
     val fractionalDist = (abs(animatedPage - nearestTab) * 2f).coerceIn(0f, 1f)
-    // Smooth cosine curve for organic liquid morphing
     val transitPhase = ((1f - cos(fractionalDist * Math.PI.toFloat())) * 0.5f).coerceIn(0f, 1f)
 
-    // Bar dimensions
-    val barTopOffsetDp = 24.dp // Extra headroom above bar for the floating orb & liquid dome
+    val barTopOffsetDp = 24.dp
     val barHeightDp = 64.dp
     val orbSizeDp = 52.dp
+
+    val barTopColor = NavSurface
+    val barBottomColor = if (isDark) Color(0xFF10121C) else Color(0xFFF3F4F6)
+    val activeOrbColor = NavActiveOrb
+    val activeIconColor = NavActiveIcon
+    val inactiveIconColor = NavInactiveIcon
 
     BoxWithConstraints(
         modifier = modifier
@@ -320,26 +327,17 @@ fun FluidCurvedBottomNav(
         val totalWidthPx = constraints.maxWidth.toFloat()
         val tabWidthPx = totalWidthPx / tabCount
         val barTopPx = with(density) { barTopOffsetDp.toPx() }
-        val barHeightPx = with(density) { barHeightDp.toPx() }
         val orbSizePx = with(density) { orbSizeDp.toPx() }
         val orbRadiusPx = orbSizePx / 2f
 
-        // Center X of the active notch
         val notchCenterX = (animatedPage + 0.5f) * tabWidthPx
 
-        // Dynamic notch depth:
-        // When settled (transitPhase = 0f): deep concave cradle (+32dp down into bar)
-        // When mid-transit (transitPhase = 1f): liquid wave / dome (-8dp upward bulge as orb merges!)
         val settledDepthPx = with(density) { 33.dp.toPx() }
         val transitPeakPx = with(density) { (-9).dp.toPx() }
         val currentNotchDepthPx = settledDepthPx * (1f - transitPhase) + transitPeakPx * transitPhase
 
-        // Notch half-width on the bar top edge
         val notchHalfWidthPx = with(density) { 47.dp.toPx() } * (1f - 0.15f * transitPhase)
 
-        // Floating Orb Y & Scale:
-        // When settled: orb floats high inside the cradle (center near barTopPx + 4dp)
-        // When mid-transit: orb dives down into the liquid bar and shrinks, then pops out at target!
         val orbCenterYSettled = barTopPx + with(density) { 3.dp.toPx() }
         val orbCenterYTransit = barTopPx + with(density) { 26.dp.toPx() }
         val currentOrbCenterY = orbCenterYSettled * (1f - transitPhase) + orbCenterYTransit * transitPhase
@@ -351,7 +349,7 @@ fun FluidCurvedBottomNav(
                     .fillMaxWidth()
                     .height(barTopOffsetDp + barHeightDp)
             ) {
-                // 1. LIQUID CURVED BAR CANVAS (With smooth cubic bezier cradle / wave)
+                // 1. LIQUID CURVED BAR CANVAS
                 Canvas(
                     modifier = Modifier.fillMaxSize()
                 ) {
@@ -369,7 +367,6 @@ fun FluidCurvedBottomNav(
                             lineTo(leftStart, barTopPx)
                         }
 
-                        // Left shoulder curve into the notch bottom/peak
                         cubicTo(
                             x1 = leftStart + c1Offset,
                             y1 = barTopPx,
@@ -379,7 +376,6 @@ fun FluidCurvedBottomNav(
                             y3 = barTopPx + currentNotchDepthPx
                         )
 
-                        // Right shoulder curve from notch bottom/peak back to top edge
                         cubicTo(
                             x1 = notchCenterX + c2Offset,
                             y1 = barTopPx + currentNotchDepthPx,
@@ -397,21 +393,16 @@ fun FluidCurvedBottomNav(
                         close()
                     }
 
-                    // Fill bar with clean, deep velvety surface
                     drawPath(
                         path = barPath,
                         brush = Brush.verticalGradient(
-                            colors = listOf(
-                                NavSurface,
-                                Color(0xFF10121C)
-                            ),
+                            colors = listOf(barTopColor, barBottomColor),
                             startY = barTopPx,
                             endY = h
                         ),
                         style = Fill
                     )
 
-                    // Top subtle specular rim along the curved contour
                     val topRimPath = Path().apply {
                         moveTo(0f, barTopPx)
                         if (leftStart > 0f) lineTo(leftStart, barTopPx)
@@ -434,20 +425,20 @@ fun FluidCurvedBottomNav(
                         if (rightEnd < w) lineTo(w, barTopPx)
                     }
 
+                    val rimColors = if (isDark) {
+                        listOf(Color(0x18FFFFFF), Color(0x4560A5FA), Color(0x18FFFFFF))
+                    } else {
+                        listOf(Color(0x14000000), Color(0x28000000), Color(0x14000000))
+                    }
+
                     drawPath(
                         path = topRimPath,
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(
-                                Color(0x18FFFFFF),
-                                Color(0x4560A5FA),
-                                Color(0x18FFFFFF)
-                            )
-                        ),
-                        style = Stroke(width = 1.2.dp.toPx())
+                        brush = Brush.horizontalGradient(colors = rimColors),
+                        style = Stroke(width = 1.1.dp.toPx())
                     )
                 }
 
-                // 2. FLOATING LIQUID DROPLET ORB (Active Tab Circle that pops out of the cradle)
+                // 2. FLOATING LIQUID DROPLET ORB
                 val activeItem = items[nearestTab.coerceIn(0, tabCount - 1)]
                 Box(
                     modifier = Modifier
@@ -461,25 +452,23 @@ fun FluidCurvedBottomNav(
                         .graphicsLayer {
                             scaleX = currentOrbScale
                             scaleY = currentOrbScale
-                            // Slight elastic rotation / tilt during fast liquid movement
                             rotationZ = (rawContinuousPage - animatedPage) * -18f
                         }
                         .shadow(
-                            elevation = 16.dp,
+                            elevation = 14.dp,
                             shape = CircleShape,
-                            ambientColor = PrimaryGlow,
-                            spotColor = PrimaryBlue
+                            ambientColor = if (isDark) PrimaryGlow else Color.Black,
+                            spotColor = if (isDark) PrimaryBlue else Color.Black
                         )
                         .clip(CircleShape)
-                        .background(NavActiveOrb)
-                        .border(1.5.dp, Color.White, CircleShape),
+                        .background(activeOrbColor)
+                        .border(1.5.dp, activeOrbColor, CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Active Icon inside the floating white orb (just like the video's crisp dark icon on white circle!)
                     Icon(
                         imageVector = activeItem.activeIcon,
                         contentDescription = activeItem.title,
-                        tint = NavActiveIcon,
+                        tint = activeIconColor,
                         modifier = Modifier
                             .size(24.dp)
                             .graphicsLayer {
@@ -501,11 +490,10 @@ fun FluidCurvedBottomNav(
                 ) {
                     items.forEachIndexed { index, item ->
                         val distFromNotch = abs(animatedPage - index)
-                        // Hide the in-bar icon when the floating orb is docked at this tab
                         val inBarVisibility = ((distFromNotch - 0.25f) / 0.55f).coerceIn(0f, 1f)
 
                         val iconTint by animateColorAsState(
-                            targetValue = if (distFromNotch < 0.5f) Color.White else NavInactiveIcon,
+                            targetValue = if (distFromNotch < 0.5f) TextPrimary else inactiveIconColor,
                             animationSpec = tween(250),
                             label = "inactiveIconTint"
                         )
@@ -541,11 +529,10 @@ fun FluidCurvedBottomNav(
                 }
             }
 
-            // System gesture navigation bar inset spacer matching the bar bottom color
             Spacer(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF10121C))
+                    .background(barBottomColor)
                     .navigationBarsPadding()
             )
         }

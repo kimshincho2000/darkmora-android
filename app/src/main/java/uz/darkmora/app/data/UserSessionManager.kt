@@ -116,4 +116,43 @@ class UserSessionManager(context: Context) {
     fun getLastWatchedEpisode(slug: String): Int {
         return prefs.getInt("last_ep_$slug", 0)
     }
+
+    // --- THEME & PREFERENCES ---
+
+    fun isDarkMode(): Boolean {
+        return prefs.getBoolean("pref_dark_mode", true)
+    }
+
+    fun setDarkMode(isDark: Boolean) {
+        prefs.edit().putBoolean("pref_dark_mode", isDark).apply()
+    }
+
+    fun getLanguage(): String {
+        return prefs.getString("pref_language", "O'zbekcha") ?: "O'zbekcha"
+    }
+
+    fun setLanguage(lang: String) {
+        prefs.edit().putString("pref_language", lang).apply()
+    }
+
+    // --- NOTIFICATIONS ---
+
+    fun isNotificationsEnabled(): Boolean {
+        return prefs.getBoolean("pref_notifications_enabled", true)
+    }
+
+    fun setNotificationsEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("pref_notifications_enabled", enabled).apply()
+    }
+
+    fun getReadNotificationIds(): Set<Int> {
+        val raw = prefs.getStringSet("read_notif_ids", emptySet()) ?: emptySet()
+        return raw.mapNotNull { it.toIntOrNull() }.toSet()
+    }
+
+    fun markNotificationsRead(ids: Collection<Int>) {
+        val current = getReadNotificationIds().toMutableSet()
+        current.addAll(ids)
+        prefs.edit().putStringSet("read_notif_ids", current.map { it.toString() }.toSet()).apply()
+    }
 }

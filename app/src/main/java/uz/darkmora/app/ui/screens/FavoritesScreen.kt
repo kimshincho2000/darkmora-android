@@ -5,7 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -89,7 +89,7 @@ fun FavoritesScreen(
             ) {
                 Text(
                     text = "${favoriteList.size} ta",
-                    color = Color.White,
+                    color = TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -121,13 +121,13 @@ fun FavoritesScreen(
                         Icon(
                             imageVector = Icons.Default.BookmarkBorder,
                             contentDescription = null,
-                            tint = Color.White,
+                            tint = TextPrimary,
                             modifier = Modifier.size(32.dp)
                         )
                     }
                     Text(
                         text = "Sevimlilar ro'yxati bo'sh",
-                        color = Color.White,
+                        color = TextPrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -141,12 +141,12 @@ fun FavoritesScreen(
                     Spacer(modifier = Modifier.height(6.dp))
                     Button(
                         onClick = onExploreClick,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
+                        colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
                         shape = RoundedCornerShape(50)
                     ) {
-                        Icon(Icons.Default.Explore, contentDescription = null, tint = BgDark)
+                        Icon(Icons.Default.Explore, contentDescription = null, tint = BgSurface)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Katalogga o'tish", color = BgDark, fontWeight = FontWeight.Bold)
+                        Text("Katalogga o'tish", color = BgSurface, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -158,9 +158,10 @@ fun FavoritesScreen(
                 contentPadding = PaddingValues(bottom = 115.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(favoriteList) { anime ->
+                itemsIndexed(favoriteList) { index, anime ->
                     AnimeCard(
                         anime = anime,
+                        index = index,
                         onClick = { onAnimeClick(anime.getEffectiveSlug()) },
                         width = 170,
                         height = 238

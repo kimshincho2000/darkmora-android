@@ -291,16 +291,16 @@ fun AnimeDetailScreen(
                                     .fillMaxWidth()
                                     .bounceClick { launchEpisode(a, targetEp) }
                                     .clip(RoundedCornerShape(50))
-                                    .background(Color.White)
+                                    .background(TextPrimary)
                                     .padding(vertical = 15.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgDark, modifier = Modifier.size(22.dp))
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgSurface, modifier = Modifier.size(22.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = buttonLabel,
-                                    color = BgDark,
+                                    color = BgSurface,
                                     fontSize = 15.5.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -344,17 +344,17 @@ fun AnimeDetailScreen(
                                         modifier = Modifier
                                             .bounceClick { selectedChunkIndex = idx }
                                             .clip(RoundedCornerShape(50))
-                                            .background(if (isSelected) Color.White else BgCard)
+                                            .background(if (isSelected) TextPrimary else BgCard)
                                             .border(
                                                 width = 0.8.dp,
-                                                color = if (isSelected) Color.White else CardBorder,
+                                                color = if (isSelected) TextPrimary else CardBorder,
                                                 shape = RoundedCornerShape(50)
                                             )
                                             .padding(horizontal = 16.dp, vertical = 7.dp)
                                     ) {
                                         Text(
                                             text = "$firstNum - $lastNum",
-                                            color = if (isSelected) BgDark else TextMuted,
+                                            color = if (isSelected) BgSurface else TextMuted,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -376,10 +376,10 @@ fun AnimeDetailScreen(
                             .padding(horizontal = 18.dp, vertical = 4.5.dp)
                             .bounceClick { launchEpisode(a, ep) }
                             .clip(RoundedCornerShape(18.dp))
-                            .background(if (isLastWatched) Color(0xFF1C2030) else BgCard)
+                            .background(if (isLastWatched) PrimaryBlue.copy(alpha = 0.14f) else BgCard)
                             .border(
                                 width = 0.8.dp,
-                                color = if (isLastWatched) Color(0x44FFFFFF) else CardBorder,
+                                color = if (isLastWatched) PrimaryBlue.copy(alpha = 0.45f) else CardBorder,
                                 shape = RoundedCornerShape(18.dp)
                             )
                             .padding(horizontal = 16.dp, vertical = 13.dp)
@@ -397,13 +397,13 @@ fun AnimeDetailScreen(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(CircleShape)
-                                        .background(if (isLastWatched) Color.White else BgSurface),
+                                        .background(if (isLastWatched) PrimaryBlue else BgSurface),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.PlayArrow,
                                         contentDescription = null,
-                                        tint = if (isLastWatched) BgDark else Color.White,
+                                        tint = if (isLastWatched) Color.White else TextPrimary,
                                         modifier = Modifier.size(18.dp)
                                     )
                                 }
@@ -416,7 +416,7 @@ fun AnimeDetailScreen(
                                     )
                                     Text(
                                         text = if (isLastWatched) "Oxirgi ko'rilgan" else a.displayTitle(),
-                                        color = if (isLastWatched) TextMuted else TextDim,
+                                        color = if (isLastWatched) PrimaryBlue else TextDim,
                                         fontSize = 11.sp
                                     )
                                 }
@@ -428,14 +428,14 @@ fun AnimeDetailScreen(
                             ) {
                                 Text(
                                     text = if (isLastWatched) "Davom etish" else "Ko'rish",
-                                    color = if (isLastWatched) Color.White else TextMuted,
+                                    color = if (isLastWatched) PrimaryBlue else TextMuted,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Icon(
                                     imageVector = Icons.Default.ChevronRight,
                                     contentDescription = null,
-                                    tint = if (isLastWatched) Color.White else TextMuted,
+                                    tint = if (isLastWatched) PrimaryBlue else TextMuted,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }

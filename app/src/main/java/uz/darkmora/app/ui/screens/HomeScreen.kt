@@ -1,17 +1,26 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package uz.darkmora.app.ui.screens
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.DarkMode
+import androidx.compose.material.icons.outlined.LightMode
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,10 +30,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
+import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.HomeData
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
@@ -43,6 +55,10 @@ fun HomeScreen(
 
     var homeData by remember { mutableStateOf<HomeData?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+    var selectedMenuTab by remember { mutableIntStateOf(0) } // 0 = Barchasi, 1 = Yangi Qismlar, 2 = Top Xitlar
+    var showNotificationsSheet by remember { mutableStateOf(false) }
+    var readNotifIds by remember { mutableStateOf(sessionManager.getReadNotificationIds()) }
+
     val scope = rememberCoroutineScope()
 
     fun fetchHome() {
@@ -65,207 +81,650 @@ fun HomeScreen(
         fetchHome()
     }
 
+    val latestItems = remember(homeData) {
+        (homeData?.latest ?: homeData?.latestEpisodes ?: homeData?.trending ?: emptyList()).take(12)
+    }
+
+    val unreadCount = remember(latestItems, readNotifIds) {
+        latestItems.count { !readNotifIds.contains(it.id) }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(BgDark)
     ) {
-        if (isLoading) {
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            // ================================================================
+            // 1. TENSEII-STYLE MODERN TOP HEADER (Greeting + Theme + Bell + Avatar)
+            // ================================================================
+            Row(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 110.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                ShimmerBox(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(370.dp),
-                    cornerRadius = 0.dp
-                )
-                Spacer(modifier = Modifier.height(22.dp))
-                ShimmerBox(
-                    modifier = Modifier
-                        .padding(horizontal = 18.dp)
-                        .width(180.dp)
-                        .height(22.dp),
-                    cornerRadius = 10.dp
-                )
-                Spacer(modifier = Modifier.height(14.dp))
+                // Brand + Greeting Column
                 Row(
-                    modifier = Modifier.padding(horizontal = 18.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    repeat(3) {
-                        ShimmerBox(
-                            modifier = Modifier
-                                .width(152.dp)
-                                .height(218.dp),
-                            cornerRadius = 20.dp
-                        )
-                    }
-                }
-            }
-        } else if (homeData != null) {
-            val data = homeData!!
-            val featuredList = (data.featured?.takeIf { it.isNotEmpty() } ?: data.trending ?: emptyList())
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 120.dp)
-            ) {
-                if (featuredList.isNotEmpty()) {
-                    item {
-                        HeroCarousel(
-                            featuredList = featuredList,
-                            onAnimeClick = onAnimeClick
-                        )
-                    }
-                }
-
-                val trending = data.trending ?: emptyList()
-                if (trending.isNotEmpty()) {
-                    item {
-                        SectionHeader(title = "Trenddagi Animelar", onSeeAllClick = onSeeAllClick)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 18.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(trending) { anime ->
-                                AnimeCard(
-                                    anime = anime,
-                                    onClick = { onAnimeClick(anime.getEffectiveSlug()) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                val latest = data.latestEpisodes ?: data.latest ?: emptyList()
-                if (latest.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SectionHeader(title = "Yangi Qismlar", onSeeAllClick = onSeeAllClick)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 18.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(latest) { anime ->
-                                AnimeCard(
-                                    anime = anime,
-                                    onClick = { onAnimeClick(anime.getEffectiveSlug()) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                val topRated = data.topRated ?: data.top ?: emptyList()
-                if (topRated.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        SectionHeader(title = "Yuqori Reyting", onSeeAllClick = onSeeAllClick)
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 18.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            items(topRated) { anime ->
-                                AnimeCard(
-                                    anime = anime,
-                                    onClick = { onAnimeClick(anime.getEffectiveSlug()) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(text = "Server bilan aloqa o'rnatilmadi", color = TextMuted, fontSize = 14.sp)
-                    Button(
-                        onClick = { fetchHome() },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color.White),
-                        shape = RoundedCornerShape(50)
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TextPrimary),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = BgDark)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Qayta urinish", color = BgDark, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "D",
+                            color = BgSurface,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "DarkMora",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = if (user != null) "Xush kelibsiz, ${user.getEffectiveName().substringBefore(" ")}" else "Anime olami • HD",
+                            color = TextMuted,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // Right Utility Icons: [Theme Toggle] [Notifications Bell] [Search] [Avatar]
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Quick Day / Night Theme Switcher Pill
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .bounceClick {
+                                val nextDark = !AppThemeState.isDark
+                                AppThemeState.isDark = nextDark
+                                sessionManager.setDarkMode(nextDark)
+                            }
+                            .clip(CircleShape)
+                            .background(BgCard)
+                            .border(0.8.dp, CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (AppThemeState.isDark) Icons.Outlined.LightMode else Icons.Outlined.DarkMode,
+                            contentDescription = "Mavzu",
+                            tint = if (AppThemeState.isDark) RatingGold else TextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Notifications Bell with Unread Red Badge
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .bounceClick {
+                                showNotificationsSheet = true
+                            }
+                            .clip(CircleShape)
+                            .background(BgCard)
+                            .border(0.8.dp, CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Notifications,
+                            contentDescription = "Bildirishnomalar",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        if (unreadCount > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 6.dp, end = 6.dp)
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(RedBadge)
+                            )
+                        }
+                    }
+
+                    // Search Button
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .bounceClick(onClick = onSeeAllClick)
+                            .clip(CircleShape)
+                            .background(BgCard)
+                            .border(0.8.dp, CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Qidirish",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    // Profile Avatar Button
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .bounceClick(onClick = onProfileClick)
+                            .clip(CircleShape)
+                            .background(BgCard)
+                            .border(1.dp, CardBorder, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!user?.photoUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = user!!.photoUrl,
+                                contentDescription = "Profil",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Profil",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isLoading) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 8.dp, bottom = 110.dp)
+                ) {
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .height(330.dp),
+                        cornerRadius = 28.dp
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+                    ShimmerBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp)
+                            .height(42.dp),
+                        cornerRadius = 50.dp
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Row(
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        repeat(3) {
+                            ShimmerBox(
+                                modifier = Modifier
+                                    .width(152.dp)
+                                    .height(218.dp),
+                                cornerRadius = 20.dp
+                            )
+                        }
+                    }
+                }
+            } else if (homeData != null) {
+                val data = homeData!!
+                val featuredList = (data.featured?.takeIf { it.isNotEmpty() } ?: data.trending ?: emptyList())
+                val trending = data.trending ?: emptyList()
+                val latest = data.latest ?: data.latestEpisodes ?: emptyList()
+                val topRated = data.topRated ?: data.top ?: emptyList()
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(bottom = 120.dp)
+                ) {
+                    // 2. 3D PARALLAX HERO CAROUSEL CARD
+                    if (featuredList.isNotEmpty()) {
+                        item {
+                            HeroCarousel(
+                                featuredList = featuredList,
+                                onAnimeClick = onAnimeClick
+                            )
+                        }
+                    }
+
+                    // 3. TENSEII PILL TABS SWITCHER (Barchasi | Yangi Qismlar | Top Xitlar)
+                    item {
+                        Spacer(modifier = Modifier.height(18.dp))
+                        PillTabs(
+                            titles = listOf("Barchasi", "Yangi Qismlar", "Top Xitlar"),
+                            selectedIndex = selectedMenuTab,
+                            onSelect = { selectedMenuTab = it }
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // 4. ANIMATED CONTENT BY TAB
+                    item {
+                        AnimatedContent(
+                            targetState = selectedMenuTab,
+                            transitionSpec = {
+                                fadeIn(animationSpec = tween(260)) togetherWith fadeOut(animationSpec = tween(200))
+                            },
+                            label = "homeTabContent"
+                        ) { tabIdx ->
+                            when (tabIdx) {
+                                0 -> {
+                                    // ALL RAILS VIEW (Staggered Entrance)
+                                    Column {
+                                        if (trending.isNotEmpty()) {
+                                            SectionHeader(title = "Trenddagi Animelar", onSeeAllClick = onSeeAllClick)
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(13.dp)
+                                            ) {
+                                                itemsIndexed(trending) { index, anime ->
+                                                    AnimeCard(
+                                                        anime = anime,
+                                                        index = index,
+                                                        onClick = { onAnimeClick(anime.getEffectiveSlug()) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (latest.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            SectionHeader(title = "So'nggi Qo'shilganlar", onSeeAllClick = onSeeAllClick)
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(13.dp)
+                                            ) {
+                                                itemsIndexed(latest) { index, anime ->
+                                                    AnimeCard(
+                                                        anime = anime,
+                                                        index = index,
+                                                        onClick = { onAnimeClick(anime.getEffectiveSlug()) }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (topRated.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            SectionHeader(title = "Yuqori Reyting", onSeeAllClick = onSeeAllClick)
+                                            LazyRow(
+                                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(13.dp)
+                                            ) {
+                                                itemsIndexed(topRated) { index, anime ->
+                                                    AnimeCard(
+                                                        anime = anime,
+                                                        index = index,
+                                                        onClick = { onAnimeClick(anime.getEffectiveSlug()) }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                1 -> {
+                                    // TENSEII RELEASE ROW FEED ("Yangi Qismlar")
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        latest.forEachIndexed { idx, anime ->
+                                            ReleaseFeedRow(
+                                                anime = anime,
+                                                index = idx,
+                                                badgeText = "${anime.displayEpisodes().ifBlank { "Yangi" }} qism",
+                                                onClick = { onAnimeClick(anime.getEffectiveSlug()) }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                2 -> {
+                                    // TOP RANKED RAILS ("Top Xitlar")
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 6.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        topRated.forEachIndexed { idx, anime ->
+                                            ReleaseFeedRow(
+                                                anime = anime,
+                                                index = idx,
+                                                badgeText = "#${idx + 1} TOP • ★ ${anime.displayRating()}",
+                                                onClick = { onAnimeClick(anime.getEffectiveSlug()) }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(text = "Server bilan aloqa o'rnatilmadi", color = TextMuted, fontSize = 14.sp)
+                        Button(
+                            onClick = { fetchHome() },
+                            colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = BgSurface)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Qayta urinish", color = BgSurface, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
         }
 
-        // Clean Minimalist Top Bar
-        Row(
+        // ================================================================
+        // NOTIFICATIONS DIALOG / SHEET
+        // ================================================================
+        if (showNotificationsSheet) {
+            NotificationsDialog(
+                notifications = latestItems,
+                readIds = readNotifIds,
+                onMarkAllRead = {
+                    val allIds = latestItems.map { it.id }
+                    sessionManager.markNotificationsRead(allIds)
+                    readNotifIds = sessionManager.getReadNotificationIds()
+                },
+                onAnimeClick = { anime ->
+                    sessionManager.markNotificationsRead(listOf(anime.id))
+                    readNotifIds = sessionManager.getReadNotificationIds()
+                    showNotificationsSheet = false
+                    onAnimeClick(anime.getEffectiveSlug())
+                },
+                onDismiss = { showNotificationsSheet = false }
+            )
+        }
+    }
+}
+
+// ============================================================================
+// TENSEII-STYLE RELEASE FEED ROW CARD
+// ============================================================================
+
+@Composable
+fun ReleaseFeedRow(
+    anime: Anime,
+    index: Int,
+    badgeText: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appear(index)
+            .bounceClick(onClick = onClick)
+            .clip(RoundedCornerShape(20.dp))
+            .background(BgCard)
+            .border(0.8.dp, CardBorder, RoundedCornerShape(20.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = anime.displayPoster(),
+            contentDescription = anime.displayTitle(),
+            contentScale = ContentScale.Crop,
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(horizontal = 18.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .width(68.dp)
+                .height(94.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(BgSurface)
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xBF11131C))
-                    .border(0.8.dp, Color(0x1FFFFFFF), RoundedCornerShape(50))
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(7.dp)
-                        .clip(CircleShape)
-                        .background(Color.White)
-                )
-                Text(
-                    text = "DarkMora",
-                    color = Color.White,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .bounceClick(onClick = onSeeAllClick)
-                        .clip(CircleShape)
-                        .background(Color(0xBF11131C))
-                        .border(0.8.dp, Color(0x1FFFFFFF), CircleShape),
-                    contentAlignment = Alignment.Center
+                        .clip(RoundedCornerShape(50))
+                        .background(PrimaryBlue.copy(alpha = 0.14f))
+                        .padding(horizontal = 9.dp, vertical = 3.dp)
                 ) {
-                    Icon(Icons.Default.Search, contentDescription = "Qidirish", tint = Color.White, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = badgeText,
+                        color = PrimaryBlue,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
 
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .bounceClick(onClick = onProfileClick)
-                        .clip(CircleShape)
-                        .background(Color(0xBF11131C))
-                        .border(0.8.dp, Color(0x28FFFFFF), CircleShape),
-                    contentAlignment = Alignment.Center
+                Text(
+                    text = anime.displayYear(),
+                    color = TextDim,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            Text(
+                text = anime.displayTitle(),
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            val genres = anime.displayGenres()
+            if (genres.isNotEmpty()) {
+                Text(
+                    text = genres.replaceFirstChar { it.uppercase() },
+                    color = TextMuted,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(TextPrimary),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = "Ko'rish",
+                tint = BgSurface,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+// ============================================================================
+// NOTIFICATIONS CENTER DIALOG (SHARED BY HOME & PROFILE)
+// ============================================================================
+
+@Composable
+fun NotificationsDialog(
+    notifications: List<Anime>,
+    readIds: Set<Int>,
+    onMarkAllRead: () -> Unit,
+    onAnimeClick: (Anime) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 520.dp)
+                .clip(RoundedCornerShape(26.dp))
+                .background(BgSurface)
+                .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
+                .padding(20.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!user?.photoUrl.isNullOrBlank()) {
-                        AsyncImage(
-                            model = user!!.photoUrl,
-                            contentDescription = "Profil",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Notifications,
+                            contentDescription = null,
+                            tint = TextPrimary,
+                            modifier = Modifier.size(22.dp)
                         )
-                    } else {
-                        Icon(Icons.Default.Person, contentDescription = "Profil", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = "Bildirishnomalar",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
+
+                    Text(
+                        text = "O'qildi qilish",
+                        color = PrimaryBlue,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { onMarkAllRead() }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                if (notifications.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 40.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Hozircha yangi bildirishnomalar yo'q",
+                            color = TextMuted,
+                            fontSize = 13.5.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        itemsIndexed(notifications) { _, anime ->
+                            val isUnread = !readIds.contains(anime.id)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isUnread) PrimaryBlue.copy(alpha = 0.08f) else BgCard)
+                                    .border(
+                                        width = 0.8.dp,
+                                        color = if (isUnread) PrimaryBlue.copy(alpha = 0.3f) else CardBorder,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .clickable { onAnimeClick(anime) }
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AsyncImage(
+                                    model = anime.displayPoster(),
+                                    contentDescription = anime.displayTitle(),
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                )
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (isUnread) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PrimaryBlue)
+                                            )
+                                        }
+                                        Text(
+                                            text = "Yangi qism qo'shildi!",
+                                            color = PrimaryBlue,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = anime.displayTitle(),
+                                        color = TextPrimary,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${anime.displayEpisodes().ifBlank { "1" }} qism • Hoziroq tomosha qiling",
+                                        color = TextMuted,
+                                        fontSize = 11.sp
+                                    )
+                                }
+
+                                Icon(
+                                    imageVector = Icons.Default.ChevronRight,
+                                    contentDescription = null,
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text("Yopish", color = BgSurface, fontWeight = FontWeight.Bold)
                 }
             }
         }

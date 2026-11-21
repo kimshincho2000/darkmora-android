@@ -5,10 +5,16 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -19,12 +25,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -32,21 +38,28 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uz.darkmora.app.data.*
 import uz.darkmora.app.network.DarkmoraApi
+import uz.darkmora.app.ui.components.appear
+import uz.darkmora.app.ui.components.bounceClick
 import uz.darkmora.app.ui.theme.*
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 @Composable
 fun ProfileScreen(
-    onNavigateToFavorites: () -> Unit
+    onNavigateToFavorites: () -> Unit,
+    onAnimeClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sessionManager = remember { UserSessionManager(context) }
@@ -54,17 +67,106 @@ fun ProfileScreen(
 
     var isLoggedIn by remember { mutableStateOf(sessionManager.isLoggedIn()) }
     var user by remember { mutableStateOf(sessionManager.getUser()) }
+    var currentLang by remember { mutableStateOf(sessionManager.getLanguage()) }
 
     var showAuthDialog by remember { mutableStateOf(false) }
-    var showEditNameDialog by remember { mutableStateOf(false) }
-    var showEditPhotoDialog by remember { mutableStateOf(false) }
+    var showManageProfileDialog by remember { mutableStateOf(false) }
+    var showPasswordDialog by remember { mutableStateOf(false) }
+    var showNotificationsDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+    var showHelpDialog by remember { mutableStateOf(false) }
     var showUpdateDialog by remember { mutableStateOf(false) }
+
     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
+    var isUploadingAvatar by remember { mutableStateOf(false) }
+
+    // Fetch latest animes for Notifications sheet
+    var notifList by remember { mutableStateOf<List<Anime>>(emptyList()) }
+    var readNotifIds by remember { mutableStateOf(sessionManager.getReadNotificationIds()) }
+
+    LaunchedEffect(Unit) {
+        try {
+            val res = DarkmoraApi.getHome()
+            if (res.ok && res.data != null) {
+                notifList = (res.data.latest ?: res.data.latestEpisodes ?: res.data.trending ?: emptyList()).take(12)
+            }
+        } catch (_: Exception) {}
+    }
 
     fun refreshUserData() {
         isLoggedIn = sessionManager.isLoggedIn()
         user = sessionManager.getUser()
+    }
+
+    // Native Android Photo Picker (Gallery Image Selector -> Compress -> Upload Base64 or Save Locally)
+    val galleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isUploadingAvatar = true
+            scope.launch {
+                try {
+                    val resultPair = withContext(Dispatchers.IO) {
+                        val inputStream = context.contentResolver.openInputStream(uri)
+                        val originalBitmap = BitmapFactory.decodeStream(inputStream)
+                        inputStream?.close()
+                        if (originalBitmap != null) {
+                            // Scale to max 512x512 square-ish avatar
+                            val maxDim = 512
+                            val ratio = minOf(maxDim.toFloat() / originalBitmap.width, maxDim.toFloat() / originalBitmap.height, 1f)
+                            val w = (originalBitmap.width * ratio).toInt().coerceAtLeast(1)
+                            val h = (originalBitmap.height * ratio).toInt().coerceAtLeast(1)
+                            val scaled = Bitmap.createScaledBitmap(originalBitmap, w, h, true)
+
+                            // Save local file copy for instant offline/local display
+                            val localFile = File(context.filesDir, "user_avatar_${System.currentTimeMillis()}.jpg")
+                            localFile.outputStream().use { fos ->
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+                            }
+
+                            val baos = ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 85, baos)
+                            val b64 = "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+                            Pair(localFile.absolutePath, b64)
+                        } else null
+                    }
+
+                    if (resultPair != null) {
+                        val (localPath, base64Data) = resultPair
+                        val token = sessionManager.getToken()
+                        var finalPhotoUrl = "file://$localPath"
+
+                        if (!token.isNullOrBlank()) {
+                            try {
+                                val apiRes = DarkmoraApi.updateProfile(token = token, photoBase64 = base64Data)
+                                if (apiRes.ok && !apiRes.photoUrl.isNullOrBlank()) {
+                                    finalPhotoUrl = apiRes.photoUrl
+                                }
+                            } catch (_: Exception) {}
+                        }
+
+                        val currentU = user ?: UserProfile(username = "user", displayName = "Foydalanuvchi")
+                        val updatedU = currentU.copy(photoUrl = finalPhotoUrl)
+                        sessionManager.updateProfile(updatedU)
+                        refreshUserData()
+                        Toast.makeText(context, "Profil rasmi galereyadan o'rnatildi!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Rasmni o'qib bo'lmadi", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Xatolik: ${e.message}", Toast.LENGTH_SHORT).show()
+                } finally {
+                    isUploadingAvatar = false
+                }
+            }
+        }
+    }
+
+    fun pickAvatarFromGallery() {
+        galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     val scrollState = rememberScrollState()
@@ -75,308 +177,761 @@ fun ProfileScreen(
             .background(BgDark)
             .statusBarsPadding()
             .verticalScroll(scrollState)
-            .padding(16.dp)
-            .padding(bottom = 90.dp)
+            .padding(horizontal = 20.dp)
+            .padding(top = 14.dp, bottom = 120.dp)
     ) {
-        Text(
-            text = "Mening Profilim",
-            color = TextPrimary,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Black
-        )
+        // ====================================================================
+        // CENTERED TOP TITLE ("Profile" - 1:1 AS IN PHOTO)
+        // ====================================================================
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "Profile",
+                color = TextPrimary,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        if (!isLoggedIn) {
-            // Guest Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF141926), Color(0xFF0F121C))
-                        )
-                    )
-                    .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
-                    .padding(20.dp)
+        // ====================================================================
+        // TOP PROFILE CARD (Avatar Circle on Left + Name & Email/Subtext on Right)
+        // ====================================================================
+        val u = user
+        val displayName = if (isLoggedIn && u != null) u.getEffectiveName() else "Mehmon Foydalanuvchi"
+        val subTitle = if (isLoggedIn && u != null) {
+            u.email?.takeIf { it.isNotBlank() }
+                ?: u.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
+                ?: "ID: #${u.userCode ?: u.dbId ?: "100"}"
+        } else {
+            "Tizimga kirish uchun bosing"
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appear(0)
+                .clip(RoundedCornerShape(22.dp))
+                .background(BgCard)
+                .border(0.8.dp, CardBorder, RoundedCornerShape(22.dp))
+                .clickable {
+                    if (isLoggedIn) {
+                        showManageProfileDialog = true
+                    } else {
+                        showAuthDialog = true
+                    }
+                }
+                .padding(horizontal = 18.dp, vertical = 18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                // Circular Avatar (Tap to pick directly from Gallery!)
+                Box(
+                    modifier = Modifier
+                        .size(66.dp)
+                        .clip(CircleShape)
+                        .background(BgSurface)
+                        .border(1.dp, CardBorder, CircleShape)
+                        .clickable {
+                            if (isLoggedIn) {
+                                pickAvatarFromGallery()
+                            } else {
+                                showAuthDialog = true
+                            }
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(70.dp)
-                            .clip(CircleShape)
-                            .background(Color(0x332563EB)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            tint = PrimaryGlow,
-                            modifier = Modifier.size(36.dp)
+                    if (isUploadingAvatar) {
+                        CircularProgressIndicator(
+                            color = PrimaryBlue,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    } else if (!u?.photoUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = u!!.photoUrl,
+                            contentDescription = displayName,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        Text(
+                            text = displayName.take(1).uppercase(),
+                            color = TextPrimary,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
 
-                    Text(
-                        text = "DarkMora ga xush kelibsiz!",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    // Small Camera Badge at Bottom Right
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(TextPrimary)
+                            .border(1.5.dp, BgCard, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Galereyadan rasm tanlash",
+                            tint = BgSurface,
+                            modifier = Modifier.size(11.dp)
+                        )
+                    }
+                }
 
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
                     Text(
-                        text = "Sevimlilarni saqlash, profil sozlamalari va yangi imkoniyatlar uchun tizimga kiring.",
+                        text = displayName,
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = subTitle,
                         color = TextMuted,
                         fontSize = 13.sp,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 18.sp
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
+                }
 
-                    Button(
-                        onClick = { showAuthDialog = true },
+                if (!isLoggedIn) {
+                    Box(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                        shape = RoundedCornerShape(14.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(TextPrimary)
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
                     ) {
-                        Icon(Icons.Default.Login, contentDescription = null, tint = Color.White)
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Kirish / Ro'yxatdan o'tish",
-                            color = Color.White,
-                            fontSize = 15.sp,
+                            text = "Kirish",
+                            color = BgSurface,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
-        } else {
-            // Logged in User Card
-            val u = user
-            val displayName = u?.getEffectiveName() ?: "Foydalanuvchi"
-            val username = u?.username ?: ""
-            val emailOrId = u?.email?.takeIf { it.isNotBlank() } ?: "ID: #${u?.userCode ?: u?.dbId ?: "100"}"
+        }
 
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // ====================================================================
+        // SECTION 1: ACCOUNT (1:1 AS IN PHOTO)
+        // ====================================================================
+        Text(
+            text = "Account",
+            color = TextMuted,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        val unreadNotifs = notifList.count { !readNotifIds.contains(it.id) }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appear(1)
+                .clip(RoundedCornerShape(22.dp))
+                .background(BgCard)
+                .border(0.8.dp, CardBorder, RoundedCornerShape(22.dp))
+        ) {
+            CleanProfileRow(
+                icon = Icons.Outlined.AccountCircle,
+                title = "Manage Profile",
+                trailingText = if (isLoggedIn) "Tahrirlash" else "Kirish",
+                onClick = {
+                    if (isLoggedIn) showManageProfileDialog = true else showAuthDialog = true
+                }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.Lock,
+                title = "Password & Security",
+                onClick = {
+                    if (isLoggedIn) showPasswordDialog = true else showAuthDialog = true
+                }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.Notifications,
+                title = "Notifications",
+                trailingText = if (unreadNotifs > 0) "$unreadNotifs yangi" else null,
+                onClick = { showNotificationsDialog = true }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.Translate,
+                title = "Language",
+                trailingText = currentLang,
+                onClick = { showLanguageDialog = true }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // ====================================================================
+        // SECTION 2: PREFERENCES (1:1 AS IN PHOTO)
+        // ====================================================================
+        Text(
+            text = "Preferences",
+            color = TextMuted,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appear(2)
+                .clip(RoundedCornerShape(22.dp))
+                .background(BgCard)
+                .border(0.8.dp, CardBorder, RoundedCornerShape(22.dp))
+        ) {
+            CleanProfileRow(
+                icon = Icons.Outlined.ListAlt,
+                title = "About Us",
+                trailingText = "v2.5.0",
+                onClick = { showAboutDialog = true }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.Contrast,
+                title = "Theme",
+                trailingText = if (AppThemeState.isDark) "Dark" else "Light",
+                onClick = { showThemeDialog = true }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.CalendarMonth,
+                title = "Appointments & Favorites",
+                trailingText = "${sessionManager.getFavorites().size} ta",
+                onClick = onNavigateToFavorites
+            )
+        }
+
+        Spacer(modifier = Modifier.height(22.dp))
+
+        // ====================================================================
+        // SECTION 3: SUPPORT (1:1 AS IN PHOTO)
+        // ====================================================================
+        Text(
+            text = "Support",
+            color = TextMuted,
+            fontSize = 13.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appear(3)
+                .clip(RoundedCornerShape(22.dp))
+                .background(BgCard)
+                .border(0.8.dp, CardBorder, RoundedCornerShape(22.dp))
+        ) {
+            CleanProfileRow(
+                icon = Icons.Outlined.HelpOutline,
+                title = "Help Center",
+                onClick = { showHelpDialog = true }
+            )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.SystemUpdate,
+                title = "Check for Updates",
+                trailingText = if (isCheckingUpdate) "..." else "v2.5.0",
+                onClick = {
+                    if (!isCheckingUpdate) {
+                        isCheckingUpdate = true
+                        scope.launch {
+                            try {
+                                val res = DarkmoraApi.checkUpdate()
+                                if (res.ok && res.data != null) {
+                                    if (res.data.versionCode > 17) {
+                                        updateInfo = res.data
+                                        showUpdateDialog = true
+                                    } else {
+                                        Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.5.0)", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Versiya tekshirishda xatolik", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Aloqa xatosi: ${e.message}", Toast.LENGTH_SHORT).show()
+                            } finally {
+                                isCheckingUpdate = false
+                            }
+                        }
+                    }
+                }
+            )
+
+            if (isLoggedIn) {
+                ProfileRowDivider()
+                CleanProfileRow(
+                    icon = Icons.Outlined.Logout,
+                    title = "Log Out",
+                    titleColor = RedBadge,
+                    onClick = {
+                        sessionManager.clearSession()
+                        refreshUserData()
+                        Toast.makeText(context, "Akkauntdan chiqildi", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        }
+    }
+
+    // ========================================================================
+    // DIALOGS & SHEETS
+    // ========================================================================
+
+    // 1. Manage Profile Dialog (Gallery Photo Picker + Display Name Edit)
+    if (showManageProfileDialog) {
+        var newName by remember { mutableStateOf(user?.displayName ?: user?.username ?: "") }
+        var isSaving by remember { mutableStateOf(false) }
+
+        Dialog(onDismissRequest = { showManageProfileDialog = false }) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF141A29), Color(0xFF0D101A))
-                        )
-                    )
-                    .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
-                    .padding(20.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Avatar with edit button
+                    Text(
+                        text = "Manage Profile",
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    // Gallery Avatar Picker Box
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(88.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF1E2538))
-                            .border(2.dp, PrimaryBlue, CircleShape)
-                            .clickable { showEditPhotoDialog = true },
+                            .background(BgCard)
+                            .border(1.5.dp, PrimaryBlue, CircleShape)
+                            .clickable { pickAvatarFromGallery() },
                         contentAlignment = Alignment.Center
                     ) {
-                        if (!u?.photoUrl.isNullOrBlank()) {
+                        if (!user?.photoUrl.isNullOrBlank()) {
                             AsyncImage(
-                                model = u!!.photoUrl,
-                                contentDescription = displayName,
+                                model = user!!.photoUrl,
+                                contentDescription = "Avatar",
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            Text(
-                                text = displayName.take(1).uppercase(),
-                                color = PrimaryGlow,
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        // Camera icon overlay
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0x33000000)),
-                            contentAlignment = Alignment.BottomEnd
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(24.dp)
-                                    .clip(CircleShape)
-                                    .background(PrimaryBlue),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.CameraAlt, contentDescription = "Rasm", tint = Color.White, modifier = Modifier.size(13.dp))
-                            }
-                        }
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = displayName,
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
                             Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Tahrirlash",
-                                tint = TextDim,
-                                modifier = Modifier
-                                    .size(16.dp)
-                                    .clickable { showEditNameDialog = true }
+                                imageVector = Icons.Default.AddAPhoto,
+                                contentDescription = null,
+                                tint = TextPrimary,
+                                modifier = Modifier.size(30.dp)
                             )
                         }
-
-                        if (username.isNotBlank()) {
-                            Text(
-                                text = "@$username",
-                                color = PrimaryGlow,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        Text(
-                            text = emailOrId,
-                            color = TextMuted,
-                            fontSize = 12.sp
-                        )
                     }
-                }
-            }
 
-            Spacer(modifier = Modifier.height(14.dp))
+                    TextButton(onClick = { pickAvatarFromGallery() }) {
+                        Icon(Icons.Default.PhotoLibrary, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Galereyadan rasm tanlash", color = PrimaryBlue, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                    }
 
-            // Quick Stats Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                QuickStatCard(
-                    title = "Sevimlilar",
-                    value = "${sessionManager.getFavorites().size} ta",
-                    icon = Icons.Default.Bookmark,
-                    modifier = Modifier.weight(1f),
-                    onClick = onNavigateToFavorites
-                )
-                QuickStatCard(
-                    title = "Holat",
-                    value = if (u?.isAdmin == true) "Admin" else "A'zo",
-                    icon = Icons.Default.Shield,
-                    modifier = Modifier.weight(1f),
-                    onClick = {}
-                )
-                QuickStatCard(
-                    title = "Versiya",
-                    value = "v2.4.1",
-                    icon = Icons.Default.Info,
-                    modifier = Modifier.weight(1f),
-                    onClick = {}
-                )
-            }
-        }
+                    OutlinedTextField(
+                        value = newName,
+                        onValueChange = { newName = it },
+                        label = { Text("Ism / Taxallus") },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryBlue,
+                            unfocusedBorderColor = CardBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
 
-        Spacer(modifier = Modifier.height(20.dp))
-
-        // Options List Section
-        Text(
-            text = "Ilova va Sozlamalar",
-            color = TextDim,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        ProfileMenuOption(
-            icon = Icons.Default.SystemUpdate,
-            title = "Yangilanishlarni tekshirish",
-            subtitle = if (isCheckingUpdate) "Tekshirilmoqda..." else "Ilovaning so'nggi versiyasi",
-            onClick = {
-                if (!isCheckingUpdate) {
-                    isCheckingUpdate = true
-                    scope.launch {
-                        try {
-                            val res = DarkmoraApi.checkUpdate()
-                            if (res.ok && res.data != null) {
-                                if (res.data.versionCode > 16) {
-                                    updateInfo = res.data
-                                    showUpdateDialog = true
-                                } else {
-                                    Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.4.1)", Toast.LENGTH_SHORT).show()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { showManageProfileDialog = false }) {
+                            Text("Bekor qilish", color = TextMuted)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (newName.isNotBlank()) {
+                                    isSaving = true
+                                    scope.launch {
+                                        try {
+                                            val token = sessionManager.getToken() ?: ""
+                                            if (token.isNotBlank()) {
+                                                DarkmoraApi.updateProfile(token, displayName = newName.trim())
+                                            }
+                                            val cur = user ?: UserProfile(username = newName.trim())
+                                            sessionManager.updateProfile(cur.copy(displayName = newName.trim()))
+                                            refreshUserData()
+                                            showManageProfileDialog = false
+                                            Toast.makeText(context, "Profil saqlandi!", Toast.LENGTH_SHORT).show()
+                                        } catch (e: Exception) {
+                                            Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                                        } finally {
+                                            isSaving = false
+                                        }
+                                    }
                                 }
-                            } else {
-                                Toast.makeText(context, "Versiya tekshirishda xatolik yuz berdi", Toast.LENGTH_SHORT).show()
-                            }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Aloqa xatosi: ${e.message}", Toast.LENGTH_SHORT).show()
-                        } finally {
-                            isCheckingUpdate = false
+                            },
+                            enabled = !isSaving,
+                            colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(if (isSaving) "Saqlanmoqda..." else "Saqlash", color = BgSurface, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             }
-        )
-
-        ProfileMenuOption(
-            icon = Icons.Default.Bookmark,
-            title = "Mening Sevimlilarim",
-            subtitle = "Saqlangan barcha animelar",
-            onClick = onNavigateToFavorites
-        )
-
-        ProfileMenuOption(
-            icon = Icons.Default.DeleteOutline,
-            title = "Keshni tozalash",
-            subtitle = "Rasmlar va vaqtinchalik fayllarni tozalash",
-            onClick = {
-                scope.launch {
-                    try {
-                        context.cacheDir.deleteRecursively()
-                        Toast.makeText(context, "Kesh muvaffaqiyatli tozalandi!", Toast.LENGTH_SHORT).show()
-                    } catch (e: Exception) {
-                        Toast.makeText(context, "Xatolik: ${e.message}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-        )
-
-        if (isLoggedIn) {
-            ProfileMenuOption(
-                icon = Icons.Default.Logout,
-                title = "Akkauntdan chiqish",
-                subtitle = "Tizimdan xavfsiz chiqish",
-                titleColor = Color(0xFFEF4444),
-                onClick = {
-                    sessionManager.clearSession()
-                    refreshUserData()
-                    Toast.makeText(context, "Akkauntdan chiqildi", Toast.LENGTH_SHORT).show()
-                }
-            )
         }
     }
 
-    // --- DIALOGS ---
+    // 2. Password & Security Dialog
+    if (showPasswordDialog) {
+        var newPass by remember { mutableStateOf("") }
+        var confirmPass by remember { mutableStateOf("") }
+        var isSaving by remember { mutableStateOf(false) }
+
+        Dialog(onDismissRequest = { showPasswordDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Password & Security", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                    OutlinedTextField(
+                        value = newPass,
+                        onValueChange = { newPass = it },
+                        label = { Text("Yangi parol (kamida 6 ta belgi)") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryBlue,
+                            unfocusedBorderColor = CardBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = confirmPass,
+                        onValueChange = { confirmPass = it },
+                        label = { Text("Yangi parolni tasdiqlang") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryBlue,
+                            unfocusedBorderColor = CardBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showPasswordDialog = false }) {
+                            Text("Bekor qilish", color = TextMuted)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (newPass.length < 6) {
+                                    Toast.makeText(context, "Parol kamida 6 belgidan iborat bo'lsin", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                if (newPass != confirmPass) {
+                                    Toast.makeText(context, "Parollar mos kelmadi", Toast.LENGTH_SHORT).show()
+                                    return@Button
+                                }
+                                isSaving = true
+                                scope.launch {
+                                    try {
+                                        val token = sessionManager.getToken() ?: ""
+                                        val res = DarkmoraApi.updateProfile(token, newPass = newPass)
+                                        if (res.ok) {
+                                            showPasswordDialog = false
+                                            Toast.makeText(context, "Parol muvaffaqiyatli yangilandi!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, res.error ?: "Xatolik yuz berdi", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                                    } finally {
+                                        isSaving = false
+                                    }
+                                }
+                            },
+                            enabled = !isSaving,
+                            colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(if (isSaving) "..." else "Yangilash", color = BgSurface, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Notifications Center Dialog
+    if (showNotificationsDialog) {
+        NotificationsDialog(
+            notifications = notifList,
+            readIds = readNotifIds,
+            onMarkAllRead = {
+                val allIds = notifList.map { it.id }
+                sessionManager.markNotificationsRead(allIds)
+                readNotifIds = sessionManager.getReadNotificationIds()
+            },
+            onAnimeClick = { anime ->
+                sessionManager.markNotificationsRead(listOf(anime.id))
+                readNotifIds = sessionManager.getReadNotificationIds()
+                showNotificationsDialog = false
+                onAnimeClick(anime.getEffectiveSlug())
+            },
+            onDismiss = { showNotificationsDialog = false }
+        )
+    }
+
+    // 4. Theme Switcher Dialog (Dark / Light)
+    if (showThemeDialog) {
+        Dialog(onDismissRequest = { showThemeDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Ilova Mavzusi (Theme)", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                    listOf(
+                        Pair(true, "Tungi rejim (Dark Mode)"),
+                        Pair(false, "Tonggi rejim (Light Mode)")
+                    ).forEach { (isDarkOpt, label) ->
+                        val selected = AppThemeState.isDark == isDarkOpt
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (selected) PrimaryBlue.copy(alpha = 0.12f) else BgCard)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (selected) PrimaryBlue else CardBorder,
+                                    shape = RoundedCornerShape(16.dp)
+                                )
+                                .clickable {
+                                    AppThemeState.isDark = isDarkOpt
+                                    sessionManager.setDarkMode(isDarkOpt)
+                                    showThemeDialog = false
+                                }
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDarkOpt) Icons.Outlined.DarkMode else Icons.Outlined.LightMode,
+                                    contentDescription = null,
+                                    tint = if (selected) PrimaryBlue else TextPrimary
+                                )
+                                Text(
+                                    text = label,
+                                    color = TextPrimary,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            if (selected) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = PrimaryBlue)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Language Selector Dialog
+    if (showLanguageDialog) {
+        Dialog(onDismissRequest = { showLanguageDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Tilni tanlang (Language)", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    listOf("O'zbekcha", "English", "Русский").forEach { lang ->
+                        val selected = currentLang == lang
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (selected) PrimaryBlue.copy(alpha = 0.12f) else BgCard)
+                                .border(1.dp, if (selected) PrimaryBlue else CardBorder, RoundedCornerShape(14.dp))
+                                .clickable {
+                                    currentLang = lang
+                                    sessionManager.setLanguage(lang)
+                                    showLanguageDialog = false
+                                }
+                                .padding(horizontal = 16.dp, vertical = 13.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(lang, color = TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold)
+                            if (selected) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = PrimaryBlue)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 6. About Us Dialog
+    if (showAboutDialog) {
+        Dialog(onDismissRequest = { showAboutDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("About DarkMora", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "DarkMora (v2.5.0) — O'zbek tilidagi eng sara animelar, kinolar va seriallarni yuqori Full HD sifatda reklamalarsiz tomosha qilish uchun yaratilgan rasmiy mobil ilova.",
+                        color = TextMuted,
+                        fontSize = 13.5.sp,
+                        lineHeight = 20.sp
+                    )
+                    Button(
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://cache.CleanCache".let { "https://darkmora.uz" })))
+                            showAboutDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text("Rasmiy sayt: darkmora.uz", color = BgSurface, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+
+    // 7. Help Center Dialog
+    if (showHelpDialog) {
+        Dialog(onDismissRequest = { showHelpDialog = false }) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(BgSurface)
+                    .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
+                    .padding(22.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Help Center & Yordam", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Savollar, takliflar yoki texnik muammolar bo'yicha rasmiy Telegram qo'llab-quvvatlash botimizga murojaat qilishingiz mumkin.",
+                        color = TextMuted,
+                        fontSize = 13.5.sp,
+                        lineHeight = 20.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                context.cacheDir.deleteRecursively()
+                                Toast.makeText(context, "Kesh tozalandi!", Toast.LENGTH_SHORT).show()
+                                showHelpDialog = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("Keshni tozalash", color = TextPrimary, fontSize = 12.5.sp)
+                        }
+                        Button(
+                            onClick = {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/darkmoraloginbot")))
+                                showHelpDialog = false
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text("Telegram Bot", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if (showAuthDialog) {
         AuthDialog(
@@ -389,158 +944,6 @@ fun ProfileScreen(
         )
     }
 
-    if (showEditNameDialog && user != null) {
-        var newName by remember { mutableStateOf(user?.displayName ?: user?.username ?: "") }
-        var isSaving by remember { mutableStateOf(false) }
-
-        Dialog(onDismissRequest = { showEditNameDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(BgCard)
-                    .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
-                    .padding(20.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Ismni tahrirlash", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        label = { Text("Yangi ism / Taxallus") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = PrimaryBlue,
-                            unfocusedBorderColor = CardBorder
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(onClick = { showEditNameDialog = false }) {
-                            Text("Bekor qilish", color = TextDim)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (newName.isNotBlank()) {
-                                    isSaving = true
-                                    scope.launch {
-                                        try {
-                                            val token = sessionManager.getToken() ?: ""
-                                            val res = DarkmoraApi.updateProfile(token, displayName = newName)
-                                            if (res.ok) {
-                                                val updated = user!!.copy(displayName = newName)
-                                                sessionManager.updateProfile(updated)
-                                                refreshUserData()
-                                                showEditNameDialog = false
-                                                Toast.makeText(context, "Ism muvaffaqiyatli yangilandi", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, res.error ?: "Xatolik yuz berdi", Toast.LENGTH_SHORT).show()
-                                            }
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
-                                        } finally {
-                                            isSaving = false
-                                        }
-                                    }
-                                }
-                            },
-                            enabled = !isSaving,
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(if (isSaving) "Saqlanmoqda..." else "Saqlash", color = Color.White)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if (showEditPhotoDialog && user != null) {
-        var photoUrlInput by remember { mutableStateOf(user?.photoUrl ?: "") }
-        var isSaving by remember { mutableStateOf(false) }
-
-        Dialog(onDismissRequest = { showEditPhotoDialog = false }) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(BgCard)
-                    .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
-                    .padding(20.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Text("Avatar rasmini o'zgartirish", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                    Text(
-                        text = "To'g'ridan-to'g'ri rasm havolasini (URL) kiriting:",
-                        color = TextMuted,
-                        fontSize = 12.sp
-                    )
-
-                    OutlinedTextField(
-                        value = photoUrlInput,
-                        onValueChange = { photoUrlInput = it },
-                        label = { Text("Rasm URL manzili") },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = PrimaryBlue,
-                            unfocusedBorderColor = CardBorder
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        TextButton(onClick = { showEditPhotoDialog = false }) {
-                            Text("Bekor qilish", color = TextDim)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (photoUrlInput.isNotBlank()) {
-                                    isSaving = true
-                                    scope.launch {
-                                        try {
-                                            val updated = user!!.copy(photoUrl = photoUrlInput)
-                                            sessionManager.updateProfile(updated)
-                                            refreshUserData()
-                                            showEditPhotoDialog = false
-                                            Toast.makeText(context, "Avatar saqlandi", Toast.LENGTH_SHORT).show()
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
-                                        } finally {
-                                            isSaving = false
-                                        }
-                                    }
-                                }
-                            },
-                            enabled = !isSaving,
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                            shape = RoundedCornerShape(10.dp)
-                        ) {
-                            Text(if (isSaving) "Saqlanmoqda..." else "Saqlash", color = Color.White)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     if (showUpdateDialog && updateInfo != null) {
         UpdateAppDialog(
             info = updateInfo!!,
@@ -549,79 +952,79 @@ fun ProfileScreen(
     }
 }
 
-@Composable
-fun QuickStatCard(
-    title: String,
-    value: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(BgCard)
-            .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
-            .clickable { onClick() }
-            .padding(vertical = 12.dp, horizontal = 8.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Icon(imageVector = icon, contentDescription = title, tint = PrimaryGlow, modifier = Modifier.size(20.dp))
-            Text(text = value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Text(text = title, color = TextDim, fontSize = 10.sp)
-        }
-    }
-}
+// ============================================================================
+// 1:1 CLEAN PROFILE ROW COMPONENT (MATCHING photo_1795265499.jpg)
+// ============================================================================
 
 @Composable
-fun ProfileMenuOption(
+private fun CleanProfileRow(
     icon: ImageVector,
     title: String,
-    subtitle: String,
-    titleColor: Color = Color.White,
+    trailingText: String? = null,
+    titleColor: Color = TextPrimary,
     onClick: () -> Unit
 ) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(BgCard)
-            .border(1.dp, CardBorder, RoundedCornerShape(14.dp))
-            .clickable { onClick() }
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x222563EB)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(imageVector = icon, contentDescription = title, tint = if (titleColor != Color.White) titleColor else PrimaryGlow, modifier = Modifier.size(20.dp))
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = if (titleColor != TextPrimary) titleColor else TextPrimary,
+                modifier = Modifier.size(22.dp)
+            )
+            Text(
+                text = title,
+                color = titleColor,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, color = titleColor, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(text = subtitle, color = TextDim, fontSize = 11.sp)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (!trailingText.isNullOrBlank()) {
+                Text(
+                    text = trailingText,
+                    color = TextMuted,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Normal
+                )
             }
-
-            Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextDim, modifier = Modifier.size(18.dp))
+            Icon(
+                imageVector = Icons.Default.ArrowForward,
+                contentDescription = null,
+                tint = TextMuted,
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
 
+@Composable
+private fun ProfileRowDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp)
+            .height(0.7.dp)
+            .background(DividerTone)
+    )
+}
+
 // ============================================================================
-// AUTH DIALOG: Telegram One-Tap + Gmail 3-Step Register + Login
+// AUTH DIALOG: Telegram One-Tap + Gmail Register + Login
 // ============================================================================
 
 @Composable
@@ -633,27 +1036,23 @@ fun AuthDialog(
     val sessionManager = remember { UserSessionManager(context) }
     val scope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Telegram, 1 = Gmail Register, 2 = Oddiy Kirish
+    var selectedTab by remember { mutableIntStateOf(0) }
 
-    // Gmail Register state
     var regUsername by remember { mutableStateOf("") }
     var regPassword by remember { mutableStateOf("") }
     var regEmail by remember { mutableStateOf("") }
     var regCode by remember { mutableStateOf("") }
-    var regStep by remember { mutableIntStateOf(1) } // 1 = Input data, 2 = Verify 6-digit code
+    var regStep by remember { mutableIntStateOf(1) }
     var isSendingCode by remember { mutableStateOf(false) }
     var isVerifyingCode by remember { mutableStateOf(false) }
 
-    // Standard Login state
     var loginUsername by remember { mutableStateOf("") }
     var loginPassword by remember { mutableStateOf("") }
     var isLoggingIn by remember { mutableStateOf(false) }
 
-    // Telegram Auth state
     var isWaitingTelegram by remember { mutableStateOf(false) }
     var tgPollToken by remember { mutableStateOf<String?>(null) }
 
-    // Auto-poll telegram
     LaunchedEffect(tgPollToken) {
         val tok = tgPollToken ?: return@LaunchedEffect
         while (isWaitingTelegram) {
@@ -669,9 +1068,7 @@ fun AuthDialog(
                     onLoginSuccess(u)
                     break
                 }
-            } catch (e: Exception) {
-                // ignore and continue polling
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -680,12 +1077,11 @@ fun AuthDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF0F121C))
+                .background(BgSurface)
                 .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
                 .padding(20.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -693,7 +1089,7 @@ fun AuthDialog(
                 ) {
                     Text(
                         text = "DarkMora Akkaunt",
-                        color = Color.White,
+                        color = TextPrimary,
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Black
                     )
@@ -702,12 +1098,11 @@ fun AuthDialog(
                     }
                 }
 
-                // Liquid Glass Tabs
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF161B2B))
+                        .background(BgCard)
                         .padding(4.dp)
                 ) {
                     val tabs = listOf("Telegram", "Gmail", "Kirish")
@@ -735,18 +1130,19 @@ fun AuthDialog(
                     }
                 }
 
-                // TAB 0: TELEGRAM AUTH
                 if (selectedTab == 0) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF229ED9).copy(alpha = 0.2f)),
+                                .background(Color(0xFF229ED9).copy(alpha = 0.16f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.Send, contentDescription = null, tint = Color(0xFF229ED9), modifier = Modifier.size(32.dp))
@@ -754,7 +1150,7 @@ fun AuthDialog(
 
                         Text(
                             text = "Telegram orqali bir bosishda kirish",
-                            color = Color.White,
+                            color = TextPrimary,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -774,10 +1170,10 @@ fun AuthDialog(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.padding(vertical = 12.dp)
                             ) {
-                                CircularProgressIndicator(color = PrimaryGlow, modifier = Modifier.size(32.dp))
+                                CircularProgressIndicator(color = PrimaryBlue, modifier = Modifier.size(32.dp))
                                 Text(
                                     text = "Telegram botda tasdiqlash kutilmoqda...",
-                                    color = PrimaryGlow,
+                                    color = PrimaryBlue,
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
@@ -823,7 +1219,6 @@ fun AuthDialog(
                     }
                 }
 
-                // TAB 1: GMAIL REGISTER
                 if (selectedTab == 1) {
                     if (regStep == 1) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -833,8 +1228,8 @@ fun AuthDialog(
                                 label = { Text("Foydalanuvchi nomi") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
                                     focusedBorderColor = PrimaryBlue,
                                     unfocusedBorderColor = CardBorder
                                 ),
@@ -848,8 +1243,8 @@ fun AuthDialog(
                                 visualTransformation = PasswordVisualTransformation(),
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
                                     focusedBorderColor = PrimaryBlue,
                                     unfocusedBorderColor = CardBorder
                                 ),
@@ -862,8 +1257,8 @@ fun AuthDialog(
                                 label = { Text("Gmail pochta manzili") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
                                     focusedBorderColor = PrimaryBlue,
                                     unfocusedBorderColor = CardBorder
                                 ),
@@ -913,11 +1308,10 @@ fun AuthDialog(
                             }
                         }
                     } else {
-                        // Step 2: Enter 6-digit OTP code
                         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Text(
                                 text = "Tasdiqlash kodi $regEmail manziliga yuborildi.",
-                                color = PrimaryGlow,
+                                color = PrimaryBlue,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -928,8 +1322,8 @@ fun AuthDialog(
                                 label = { Text("6 xonali tasdiqlash kodi") },
                                 singleLine = true,
                                 colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary,
                                     focusedBorderColor = PrimaryBlue,
                                     unfocusedBorderColor = CardBorder
                                 ),
@@ -987,7 +1381,6 @@ fun AuthDialog(
                     }
                 }
 
-                // TAB 2: STANDARD LOGIN
                 if (selectedTab == 2) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedTextField(
@@ -996,8 +1389,8 @@ fun AuthDialog(
                             label = { Text("Login yoki Email") },
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
                                 focusedBorderColor = PrimaryBlue,
                                 unfocusedBorderColor = CardBorder
                             ),
@@ -1011,8 +1404,8 @@ fun AuthDialog(
                             visualTransformation = PasswordVisualTransformation(),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary,
                                 focusedBorderColor = PrimaryBlue,
                                 unfocusedBorderColor = CardBorder
                             ),
@@ -1078,7 +1471,7 @@ fun UpdateAppDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF0D101A))
+                .background(BgSurface)
                 .border(1.dp, CardBorder, RoundedCornerShape(24.dp))
                 .padding(22.dp)
         ) {
@@ -1091,14 +1484,14 @@ fun UpdateAppDialog(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(Color(0x332563EB)),
+                            .background(PrimaryBlue.copy(alpha = 0.18f)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = PrimaryGlow, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = PrimaryBlue, modifier = Modifier.size(22.dp))
                     }
                     Column {
-                        Text("Yangi Versiya Mavjud!", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                        Text("Versiya: ${info.versionName} (Build ${info.versionCode})", color = PrimaryGlow, fontSize = 12.sp)
+                        Text("Yangi Versiya Mavjud!", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Text("Versiya: ${info.versionName} (Build ${info.versionCode})", color = PrimaryBlue, fontSize = 12.sp)
                     }
                 }
 
@@ -1107,7 +1500,7 @@ fun UpdateAppDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF141824))
+                            .background(BgCard)
                             .padding(12.dp)
                     ) {
                         Text(
@@ -1123,9 +1516,11 @@ fun UpdateAppDialog(
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp)
                     ) {
-                        LinearProgressIndicator(color = PrimaryGlow, modifier = Modifier.fillMaxWidth())
+                        LinearProgressIndicator(color = PrimaryBlue, modifier = Modifier.fillMaxWidth())
                         Text("APK yuklanmoqda... Iltimos kuting.", color = TextDim, fontSize = 12.sp)
                     }
                 } else {
@@ -1217,7 +1612,6 @@ fun downloadAndInstallApk(context: Context, apkUrl: String) {
         Toast.makeText(context, "Yuklab olish boshlandi...", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         Toast.makeText(context, "Yuklashda xatolik: ${e.message}", Toast.LENGTH_SHORT).show()
-        // Fallback: open in browser
         val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(apkUrl)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }

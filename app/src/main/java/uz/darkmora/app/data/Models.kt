@@ -145,5 +145,6 @@ data class CheckUpdateResponse(
 data class BaseResponse(
     val ok: Boolean,
     val error: String? = null,
-    val message: String? = null
+    val message: String? = null,
+    @SerializedName("photo_url") val photoUrl: String? = null
 )
