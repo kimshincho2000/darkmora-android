@@ -288,7 +288,7 @@ fun ProfileScreen(
                 )
                 QuickStatCard(
                     title = "Versiya",
-                    value = "v2.4.0",
+                    value = "v2.4.1",
                     icon = Icons.Default.Info,
                     modifier = Modifier.weight(1f),
                     onClick = {}
@@ -319,11 +319,11 @@ fun ProfileScreen(
                         try {
                             val res = DarkmoraApi.checkUpdate()
                             if (res.ok && res.data != null) {
-                                if (res.data.versionCode > 15) {
+                                if (res.data.versionCode > 16) {
                                     updateInfo = res.data
                                     showUpdateDialog = true
                                 } else {
-                                    Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.4.0)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.4.1)", Toast.LENGTH_SHORT).show()
                                 }
                             } else {
                                 Toast.makeText(context, "Versiya tekshirishda xatolik yuz berdi", Toast.LENGTH_SHORT).show()
@@ -1162,7 +1162,19 @@ fun UpdateAppDialog(
 
 fun downloadAndInstallApk(context: Context, apkUrl: String) {
     try {
-        val request = DownloadManager.Request(Uri.parse(apkUrl))
+        val parsedUri = Uri.parse(apkUrl)
+        val host = parsedUri.host?.lowercase() ?: ""
+        if (parsedUri.scheme?.lowercase() != "https" || (!host.endsWith("darkmora.uz") && !host.endsWith("wwwz.uz"))) {
+            Toast.makeText(context, "Xavfsizlik: Noma'lum manbadan APK yuklash bloklandi!", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val targetApkFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DarkMora-update.apk")
+        if (targetApkFile.exists()) {
+            targetApkFile.delete()
+        }
+
+        val request = DownloadManager.Request(parsedUri)
             .setTitle("DarkMora Yangilanish")
             .setDescription("Yangi versiya yuklanmoqda...")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

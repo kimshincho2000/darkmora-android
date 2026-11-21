@@ -8,11 +8,14 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import uz.darkmora.app.data.*
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 object DarkmoraApi {
     private const val BASE_URL = "https://darkmora.uz/api"
     private val JSON_MEDIA = "application/json; charset=utf-8".toMediaType()
+
+    private fun enc(value: String): String = URLEncoder.encode(value, "UTF-8")
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -32,7 +35,7 @@ object DarkmoraApi {
     }
 
     suspend fun getCatalog(page: Int = 1, genre: String = "", q: String = ""): CatalogResponse = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL?action=catalog&page=$page&genre=$genre&q=$q"
+        val url = "$BASE_URL?action=catalog&page=$page&genre=${enc(genre)}&q=${enc(q)}"
         val request = Request.Builder()
             .url(url)
             .build()
@@ -44,7 +47,7 @@ object DarkmoraApi {
 
     suspend fun getAnimeDetail(slug: String): AnimeDetailResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$BASE_URL?action=anime&slug=$slug")
+            .url("$BASE_URL?action=anime&slug=${enc(slug)}")
             .build()
         client.newCall(request).execute().use { response ->
             val json = response.body?.string() ?: "{}"
@@ -54,7 +57,7 @@ object DarkmoraApi {
 
     suspend fun search(q: String): CatalogResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$BASE_URL?action=search&q=$q")
+            .url("$BASE_URL?action=search&q=${enc(q)}")
             .build()
         client.newCall(request).execute().use { response ->
             val json = response.body?.string() ?: "{}"
@@ -76,7 +79,7 @@ object DarkmoraApi {
 
     suspend fun pollTelegramAuth(token: String): TgAuthPollResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$BASE_URL?action=tg_auth_poll&token=$token")
+            .url("$BASE_URL?action=tg_auth_poll&token=${enc(token)}")
             .build()
         client.newCall(request).execute().use { response ->
             val json = response.body?.string() ?: "{}"
