@@ -80,7 +80,7 @@ fun MainApp() {
     LaunchedEffect(Unit) {
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 14) {
+            if (res.ok && res.data != null && res.data.versionCode > 15) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }

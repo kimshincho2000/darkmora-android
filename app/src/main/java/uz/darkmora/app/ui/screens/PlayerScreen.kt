@@ -1,36 +1,51 @@
 package uz.darkmora.app.ui.screens
 
 import android.app.Activity
+import android.app.PictureInPictureParams
+import android.content.Context
+import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.media.AudioManager
 import android.net.Uri
+import android.os.Build
 import android.util.Base64
+import android.util.Rational
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.annotation.OptIn
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -52,8 +67,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
@@ -62,6 +78,32 @@ import uz.darkmora.app.ui.theme.*
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+
+// ============================================================================
+// APPLE TV+ / iOS 26 LIQUID GLASS 1:1 PLAYER (EXACT MATCH TO REFERENCE PHOTO)
+// ============================================================================
+
+private val GlassFill = Brush.verticalGradient(
+    colors = listOf(
+        Color(0x75383532),
+        Color(0x881E1C1A)
+    )
+)
+
+private val GlassActiveFill = Brush.verticalGradient(
+    colors = listOf(
+        Color(0x99524E4A),
+        Color(0xAA2D2A27)
+    )
+)
+
+private val GlassBorderBrush = Brush.verticalGradient(
+    colors = listOf(
+        Color(0x66FFFFFF),
+        Color(0x18FFFFFF),
+        Color(0x38FFFFFF)
+    )
+)
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -76,7 +118,7 @@ fun PlayerScreen(
     val view = LocalView.current
     val activity = context as? Activity
     val sessionManager = remember { UserSessionManager(context) }
-    val scope = rememberCoroutineScope()
+    val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
     val initialUrl = remember(videoUrlEncoded) {
         try {
@@ -100,15 +142,16 @@ fun PlayerScreen(
     var currentTitle by remember { mutableStateOf(initialTitle) }
     var currentEpNum by remember { mutableIntStateOf(initialEpisode) }
     var animeBaseTitle by remember { mutableStateOf(initialTitle.substringBefore(" - ")) }
+    var animeDetail by remember { mutableStateOf<Anime?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
 
-    // Fetch episodes list in background if slug is provided so Next/Prev & Episodes drawer work inside player
     LaunchedEffect(slug) {
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, currentEpNum)
             try {
                 val res = DarkmoraApi.getAnimeDetail(slug)
                 if (res.ok && res.data != null) {
+                    animeDetail = res.data.anime
                     episodes = res.data.episodes ?: emptyList()
                     res.data.anime?.displayTitle()?.let { animeBaseTitle = it }
                 }
@@ -125,15 +168,24 @@ fun PlayerScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var retryKey by remember { mutableIntStateOf(0) }
 
-    // Custom UI Overlay States
+    // Hardware Volume State (synced with top-right Volume Capsule)
+    val maxStreamVol = remember { max(1, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)) }
+    var volumeFraction by remember {
+        mutableFloatStateOf(
+            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxStreamVol.toFloat()
+        )
+    }
+
+    // Custom UI Overlay States matching the photo
     var showControls by remember { mutableStateOf(true) }
-    var isLocked by remember { mutableStateOf(false) }
-    var showEpisodesDrawer by remember { mutableStateOf(false) }
+    var activeBottomSheet by remember { mutableStateOf<String?>(null) } // "info", "insight", "continue", "subtitles", "audio", "speed"
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
+    var audioBoostEnabled by remember { mutableStateOf(false) }
+    var subtitleState by remember { mutableStateOf("O'zbekcha (Original)") }
     var seekIndicatorText by remember { mutableStateOf<String?>(null) }
-    var isUserDraggingSlider by remember { mutableStateOf(false) }
-    var sliderDragPosition by remember { mutableFloatStateOf(0f) }
+    var isDraggingSeek by remember { mutableStateOf(false) }
+    var dragSeekFraction by remember { mutableFloatStateOf(0f) }
     var lastInteractionTick by remember { mutableIntStateOf(0) }
 
     // Lock to sensor landscape & enter true immersive fullscreen mode
@@ -156,7 +208,7 @@ fun PlayerScreen(
 
     val httpDataSourceFactory = remember {
         DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DarkMora/2.2")
+            .setUserAgent("Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DarkMora/2.4")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(25000)
             .setReadTimeoutMs(35000)
@@ -192,7 +244,6 @@ fun PlayerScreen(
         }
     }
 
-    // Load media source whenever currentVideoUrl changes
     LaunchedEffect(currentVideoUrl, exoPlayer) {
         if (currentVideoUrl.isNotBlank()) {
             isBuffering = true
@@ -208,29 +259,27 @@ fun PlayerScreen(
         }
     }
 
-    // Update progress timer every 500ms
     LaunchedEffect(exoPlayer, isPlaying) {
         while (true) {
             currentPosition = max(0L, exoPlayer.currentPosition)
             bufferedPosition = max(0L, exoPlayer.bufferedPosition)
             val d = exoPlayer.duration
             if (d > 0) duration = d
-            delay(500)
+            delay(400)
         }
     }
 
-    // Auto-hide controls after 3.8 seconds of inactivity while playing
-    LaunchedEffect(showControls, isPlaying, lastInteractionTick, isUserDraggingSlider, showEpisodesDrawer) {
-        if (showControls && isPlaying && !isUserDraggingSlider && !showEpisodesDrawer) {
-            delay(3800)
+    // Auto-hide controls after 4 seconds of inactivity while playing
+    LaunchedEffect(showControls, isPlaying, lastInteractionTick, isDraggingSeek, activeBottomSheet) {
+        if (showControls && isPlaying && !isDraggingSeek && activeBottomSheet == null) {
+            delay(4000)
             showControls = false
         }
     }
 
-    // Auto-clear double-tap seek indicator
     LaunchedEffect(seekIndicatorText) {
         if (seekIndicatorText != null) {
-            delay(850)
+            delay(800)
             seekIndicatorText = null
         }
     }
@@ -249,44 +298,47 @@ fun PlayerScreen(
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, ep.qism)
         }
-        showEpisodesDrawer = false
+        activeBottomSheet = null
         lastInteractionTick++
     }
 
-    val currentEpIndex = episodes.indexOfFirst { it.qism == currentEpNum }
-    val hasPrevEp = currentEpIndex > 0
-    val hasNextEp = currentEpIndex >= 0 && currentEpIndex < episodes.size - 1
+    fun setSystemVolume(fraction: Float) {
+        val clamped = fraction.coerceIn(0f, 1f)
+        volumeFraction = clamped
+        val targetVol = (clamped * maxStreamVol).toInt()
+        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+        exoPlayer.volume = if (audioBoostEnabled) min(1f, clamped * 1.2f) else clamped
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(isLocked, showEpisodesDrawer) {
+            .pointerInput(activeBottomSheet) {
                 detectTapGestures(
                     onTap = {
-                        if (showEpisodesDrawer) {
-                            showEpisodesDrawer = false
+                        if (activeBottomSheet != null) {
+                            activeBottomSheet = null
                         } else {
                             showControls = !showControls
                             lastInteractionTick++
                         }
                     },
                     onDoubleTap = { offset ->
-                        if (isLocked) return@detectTapGestures
                         val width = size.width
                         when {
                             offset.x < width * 0.35f -> {
                                 val target = max(0L, exoPlayer.currentPosition - 10_000L)
                                 exoPlayer.seekTo(target)
                                 currentPosition = target
-                                seekIndicatorText = "⏪ -10 soniya"
+                                seekIndicatorText = "-10s"
                             }
                             offset.x > width * 0.65f -> {
                                 val maxDur = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
                                 val target = min(maxDur, exoPlayer.currentPosition + 10_000L)
                                 exoPlayer.seekTo(target)
                                 currentPosition = target
-                                seekIndicatorText = "⏩ +10 soniya"
+                                seekIndicatorText = "+10s"
                             }
                             else -> {
                                 if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
@@ -297,7 +349,7 @@ fun PlayerScreen(
                 )
             }
     ) {
-        // 1. Video Surface (with stock controller DISABLED so our Liquid Glass UI is in full control)
+        // 1. Video Surface
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
@@ -318,61 +370,32 @@ fun PlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Double-Tap Seek Floating Feedback Pill
+        // 2. Subtle Double-Tap Feedback Pill
         AnimatedVisibility(
             visible = seekIndicatorText != null,
-            enter = fadeIn() + scaleIn(initialScale = 0.8f),
-            exit = fadeOut() + scaleOut(targetScale = 0.8f),
+            enter = fadeIn() + scaleIn(initialScale = 0.85f),
+            exit = fadeOut() + scaleOut(targetScale = 0.85f),
             modifier = Modifier.align(Alignment.Center)
         ) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xCC0D1220))
-                    .border(1.dp, PrimaryGlow, RoundedCornerShape(24.dp))
-                    .padding(horizontal = 24.dp, vertical = 12.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(GlassFill)
+                    .border(1.dp, GlassBorderBrush, RoundedCornerShape(50))
+                    .padding(horizontal = 22.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = seekIndicatorText ?: "",
                     color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        // 3. Locked Screen Floating Pill
-        if (isLocked) {
-            AnimatedVisibility(
-                visible = showControls,
-                enter = fadeIn() + slideInVertically { -it },
-                exit = fadeOut() + slideOutVertically { -it },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 24.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .bounceClick {
-                            isLocked = false
-                            lastInteractionTick++
-                        }
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xDD0D111E))
-                        .border(1.dp, PrimaryGlow, RoundedCornerShape(24.dp))
-                        .padding(horizontal = 18.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(Icons.Default.Lock, contentDescription = "Unlock", tint = PrimaryGlow, modifier = Modifier.size(18.dp))
-                    Text("Ekran qulflangan • Ochish uchun bosing", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-
-        // 4. Full Custom Liquid Glass Controls Overlay
+        // 3. 1:1 APPLE TV+ LIQUID GLASS OVERLAY (EXACTLY AS IN PHOTO)
         AnimatedVisibility(
-            visible = showControls && !isLocked,
+            visible = showControls,
             enter = fadeIn(animationSpec = tween(220)),
             exit = fadeOut(animationSpec = tween(220)),
             modifier = Modifier.fillMaxSize()
@@ -383,195 +406,251 @@ fun PlayerScreen(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xCC05070D),
-                                Color(0x3305070D),
-                                Color(0x3305070D),
-                                Color(0xDD05070D)
+                                Color(0x88000000),
+                                Color(0x18000000),
+                                Color(0x22000000),
+                                Color(0xB3000000)
                             )
                         )
                     )
+                    .padding(horizontal = 26.dp, vertical = 20.dp)
             ) {
-                // --- TOP LIQUID GLASS BAR ---
+                // ============================================================
+                // TOP ROW: [X] + [PiP | ScreenFit/Cast | Share] ... [Volume Bar]
+                // ============================================================
                 Row(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Back + Title
+                    // Top-Left Group: Close Circle + 3-Icon Utility Capsule
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.weight(1f)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        // 1. Circular Close [X] Button
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(44.dp)
                                 .bounceClick(onClick = onBackClick)
                                 .clip(CircleShape)
-                                .background(Color(0xBF101424))
-                                .border(1.dp, Color(0x33FFFFFF), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Orqaga", tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
-
-                        Column {
-                            Text(
-                                text = currentTitle,
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "DarkMora Cinema • HD Oqim",
-                                color = PrimaryGlow,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
-                    }
-
-                    // Top Right Action Pills (Episodes, Speed, AspectRatio, Lock)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        // Episodes list button (if episodes available)
-                        if (episodes.isNotEmpty()) {
-                            GlassPlayerChip(
-                                icon = Icons.Default.PlaylistPlay,
-                                label = "Qismlar (${episodes.size})",
-                                onClick = {
-                                    showEpisodesDrawer = true
-                                    lastInteractionTick++
-                                }
-                            )
-                        }
-
-                        // Speed Toggle Chip
-                        GlassPlayerChip(
-                            icon = Icons.Default.Speed,
-                            label = "${playbackSpeed}x",
-                            onClick = {
-                                val speeds = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-                                val nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.size
-                                playbackSpeed = speeds[nextIdx]
-                                exoPlayer.playbackParameters = PlaybackParameters(playbackSpeed)
-                                lastInteractionTick++
-                            }
-                        )
-
-                        // Aspect Ratio Toggle Chip
-                        val resizeLabel = when (resizeMode) {
-                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "To'liq"
-                            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Cho'zish"
-                            else -> "Asl"
-                        }
-                        GlassPlayerChip(
-                            icon = Icons.Default.AspectRatio,
-                            label = resizeLabel,
-                            onClick = {
-                                resizeMode = when (resizeMode) {
-                                    AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                    AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-                                    else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                }
-                                lastInteractionTick++
-                            }
-                        )
-
-                        // Lock Button
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .bounceClick {
-                                    isLocked = true
-                                    lastInteractionTick++
-                                }
-                                .clip(CircleShape)
-                                .background(Color(0xBF101424))
-                                .border(1.dp, Color(0x33FFFFFF), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.LockOpen, contentDescription = "Lock", tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
-
-                // --- CENTER PLAYBACK CONTROLS ---
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(24.dp)
-                ) {
-                    // Previous Episode
-                    if (episodes.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .bounceClick {
-                                    if (hasPrevEp) switchEpisode(episodes[currentEpIndex - 1])
-                                }
-                                .clip(CircleShape)
-                                .background(Color(0x99101424))
-                                .border(1.dp, if (hasPrevEp) Color(0x33FFFFFF) else Color(0x11FFFFFF), CircleShape),
+                                .background(GlassFill)
+                                .border(1.dp, GlassBorderBrush, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = Icons.Default.SkipPrevious,
-                                contentDescription = "Oldingi qism",
-                                tint = if (hasPrevEp) Color.White else Color(0x44FFFFFF),
-                                modifier = Modifier.size(24.dp)
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Yopish",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // 2. 3-Icon Glass Capsule: [PiP]  [Screen Display/Cast]  [Share]
+                        Row(
+                            modifier = Modifier
+                                .height(44.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(GlassFill)
+                                .border(1.dp, GlassBorderBrush, RoundedCornerShape(50))
+                                .padding(horizontal = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(24.dp)
+                        ) {
+                            // Icon 1: Picture-in-Picture (PiP)
+                            Icon(
+                                imageVector = Icons.Default.PictureInPictureAlt,
+                                contentDescription = "PiP",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && activity != null) {
+                                            try {
+                                                val params = PictureInPictureParams.Builder()
+                                                    .setAspectRatio(Rational(16, 9))
+                                                    .build()
+                                                activity.enterPictureInPictureMode(params)
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "PiP rejimi qo'llab-quvvatlanmaydi", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                        lastInteractionTick++
+                                    }
+                            )
+
+                            // Icon 2: TV / Display Aspect Ratio Fit
+                            Icon(
+                                imageVector = Icons.Default.Tv,
+                                contentDescription = "Ekran o'lchami",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        resizeMode = when (resizeMode) {
+                                            AspectRatioFrameLayout.RESIZE_MODE_FIT -> {
+                                                Toast.makeText(context, "Ekran: To'ldirish (Zoom)", Toast.LENGTH_SHORT).show()
+                                                AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                            }
+                                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> {
+                                                Toast.makeText(context, "Ekran: Cho'zish (Stretch)", Toast.LENGTH_SHORT).show()
+                                                AspectRatioFrameLayout.RESIZE_MODE_FILL
+                                            }
+                                            else -> {
+                                                Toast.makeText(context, "Ekran: Asl o'lcham (Original)", Toast.LENGTH_SHORT).show()
+                                                AspectRatioFrameLayout.RESIZE_MODE_FIT
+                                            }
+                                        }
+                                        lastInteractionTick++
+                                    }
+                            )
+
+                            // Icon 3: Share (iOS style share action)
+                            Icon(
+                                imageVector = Icons.Default.IosShare,
+                                contentDescription = "Ulashish",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        val shareUrl = if (slug.isNotBlank()) "https://darkmora.uz/anime/$slug" else "https://darkmora.uz"
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_TEXT, "$animeBaseTitle ($currentEpNum-qism) — DarkMora'da tomosha qiling: $shareUrl")
+                                        }
+                                        context.startActivity(Intent.createChooser(sendIntent, "Ulashish"))
+                                        lastInteractionTick++
+                                    }
                             )
                         }
                     }
 
-                    // Rewind 10s
+                    // Top-Right Group: Volume Slider Capsule [ ━━━─── 🔊 ]
+                    Row(
+                        modifier = Modifier
+                            .width(176.dp)
+                            .height(44.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(GlassFill)
+                            .border(1.dp, GlassBorderBrush, RoundedCornerShape(50))
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Smooth Touch/Drag Volume Track (White active bar on translucent grey track, no knob)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(24.dp)
+                                .pointerInput(Unit) {
+                                    detectTapGestures { offset ->
+                                        setSystemVolume(offset.x / size.width.toFloat())
+                                        lastInteractionTick++
+                                    }
+                                }
+                                .pointerInput(Unit) {
+                                    detectHorizontalDragGestures { change, _ ->
+                                        change.consume()
+                                        setSystemVolume(change.position.x / size.width.toFloat())
+                                        lastInteractionTick++
+                                    }
+                                },
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Canvas(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(6.dp)
+                            ) {
+                                val trackRadius = CornerRadius(size.height / 2f, size.height / 2f)
+                                // Inactive background track
+                                drawRoundRect(
+                                    color = Color(0x55FFFFFF),
+                                    size = size,
+                                    cornerRadius = trackRadius
+                                )
+                                // Active white fill
+                                val activeW = (size.width * volumeFraction.coerceIn(0f, 1f))
+                                if (activeW > 0f) {
+                                    drawRoundRect(
+                                        color = Color.White,
+                                        size = Size(activeW, size.height),
+                                        cornerRadius = trackRadius
+                                    )
+                                }
+                            }
+                        }
+
+                        // Speaker Icon (Tap to mute/unmute)
+                        Icon(
+                            imageVector = if (volumeFraction <= 0.02f) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                            contentDescription = "Ovoz",
+                            tint = Color.White,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .bounceClick {
+                                    if (volumeFraction > 0.02f) {
+                                        setSystemVolume(0f)
+                                    } else {
+                                        setSystemVolume(0.7f)
+                                    }
+                                    lastInteractionTick++
+                                }
+                        )
+                    }
+                }
+
+                // ============================================================
+                // CENTER ROW: [ (10) Rewind ]   [  || Pause  ]   [ (10) Forward ]
+                // ============================================================
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(34.dp)
+                ) {
+                    // Left Circle: Rewind 10s
                     Box(
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(56.dp)
                             .bounceClick {
                                 val target = max(0L, exoPlayer.currentPosition - 10_000L)
                                 exoPlayer.seekTo(target)
                                 currentPosition = target
-                                seekIndicatorText = "⏪ -10s"
+                                seekIndicatorText = "-10s"
                                 lastInteractionTick++
                             }
                             .clip(CircleShape)
-                            .background(Color(0xBF101424))
-                            .border(1.dp, Color(0x38FFFFFF), CircleShape),
+                            .background(GlassFill)
+                            .border(1.dp, GlassBorderBrush, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Replay10, contentDescription = "-10s", tint = Color.White, modifier = Modifier.size(28.dp))
+                        Icon(
+                            imageVector = Icons.Default.Replay10,
+                            contentDescription = "-10s",
+                            tint = Color.White,
+                            modifier = Modifier.size(29.dp)
+                        )
                     }
 
-                    // Play / Pause Main Glowing Liquid Glass Button
+                    // Center Circle: Large Play / Pause Glass Orb
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(78.dp)
                             .bounceClick {
                                 if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
                                 lastInteractionTick++
                             }
-                            .shadow(20.dp, CircleShape, spotColor = PrimaryGlow)
                             .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    colors = listOf(PrimaryBlue, Color(0xFF1D4ED8))
-                                )
-                            )
-                            .border(1.5.dp, Color(0x8838BDF8), CircleShape),
+                            .background(GlassFill)
+                            .border(1.2.dp, GlassBorderBrush, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         if (isBuffering) {
                             CircularProgressIndicator(
                                 color = Color.White,
-                                strokeWidth = 3.dp,
+                                strokeWidth = 2.8.dp,
                                 modifier = Modifier.size(34.dp)
                             )
                         } else {
@@ -579,151 +658,495 @@ fun PlayerScreen(
                                 imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = "Play/Pause",
                                 tint = Color.White,
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(42.dp)
                             )
                         }
                     }
 
-                    // Forward 10s
+                    // Right Circle: Forward 10s
                     Box(
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(56.dp)
                             .bounceClick {
                                 val maxDur = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
                                 val target = min(maxDur, exoPlayer.currentPosition + 10_000L)
                                 exoPlayer.seekTo(target)
                                 currentPosition = target
-                                seekIndicatorText = "⏩ +10s"
+                                seekIndicatorText = "+10s"
                                 lastInteractionTick++
                             }
                             .clip(CircleShape)
-                            .background(Color(0xBF101424))
-                            .border(1.dp, Color(0x38FFFFFF), CircleShape),
+                            .background(GlassFill)
+                            .border(1.dp, GlassBorderBrush, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Forward10, contentDescription = "+10s", tint = Color.White, modifier = Modifier.size(28.dp))
-                    }
-
-                    // Next Episode
-                    if (episodes.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .bounceClick {
-                                    if (hasNextEp) switchEpisode(episodes[currentEpIndex + 1])
-                                }
-                                .clip(CircleShape)
-                                .background(Color(0x99101424))
-                                .border(1.dp, if (hasNextEp) Color(0x33FFFFFF) else Color(0x11FFFFFF), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.SkipNext,
-                                contentDescription = "Keyingi qism",
-                                tint = if (hasNextEp) Color.White else Color(0x44FFFFFF),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.Forward10,
+                            contentDescription = "+10s",
+                            tint = Color.White,
+                            modifier = Modifier.size(29.dp)
+                        )
                     }
                 }
 
-                // --- BOTTOM SEEKBAR & QUICK ACTIONS ---
+                // ============================================================
+                // BOTTOM SECTION:
+                // 1. Left: Episode Subtitle + Bold Anime Title | Right: [Subtitles | AudioWave | Speed] Capsule
+                // 2. Full-width Rounded Minimalist Progress Bar (White fill on frosted track)
+                // 3. Bottom Left Pills: [Info]  [InSight]  [Continue Watching]
+                // ============================================================
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Quick Row: Skip OP (+85s) & Next Episode shortcut
+                    // Row above progress bar: Titles on Left, 3-Icon Media Capsule on Right
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.Bottom
                     ) {
-                        // Skip Opening (+85s) button
-                        Row(
-                            modifier = Modifier
-                                .bounceClick {
-                                    val maxDur = if (exoPlayer.duration > 0) exoPlayer.duration else Long.MAX_VALUE
-                                    val target = min(maxDur, exoPlayer.currentPosition + 85_000L)
-                                    exoPlayer.seekTo(target)
-                                    currentPosition = target
-                                    seekIndicatorText = "⏩ OP O'tkazildi (+85s)"
-                                    lastInteractionTick++
-                                }
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xCC121728))
-                                .border(1.dp, Color(0x4438BDF8), RoundedCornerShape(12.dp))
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // Left: Episode label ("The Promotion" style) + Large Bold Series Title ("The Studio" style)
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
-                            Icon(Icons.Default.FastForward, contentDescription = null, tint = PrimaryGlow, modifier = Modifier.size(16.dp))
-                            Text("OP O'tkazish (+85s)", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                text = "$currentEpNum-qism • ${formatDurationMs(currentPosition)} / ${formatDurationMs(duration)}",
+                                color = Color(0xCCFFFFFF),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = animeBaseTitle.ifBlank { currentTitle },
+                                color = Color.White,
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
 
-                        if (hasNextEp) {
-                            val nextEpObj = episodes[currentEpIndex + 1]
-                            Row(
+                        // Right: 3-Icon Capsule [Subtitles 💬] [Audio Wave  Equalizer] [Speedometer ⏱️]
+                        Row(
+                            modifier = Modifier
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(GlassFill)
+                                .border(1.dp, GlassBorderBrush, RoundedCornerShape(50))
+                                .padding(horizontal = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(22.dp)
+                        ) {
+                            // Icon 1: Subtitles / Captions
+                            Icon(
+                                imageVector = Icons.Outlined.Subtitles,
+                                contentDescription = "Subtitrlar",
+                                tint = if (activeBottomSheet == "subtitles") PrimaryGlow else Color.White,
                                 modifier = Modifier
-                                    .bounceClick { switchEpisode(nextEpObj) }
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(PrimaryBlue)
-                                    .border(1.dp, PrimaryGlow, RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Text("Keyingi: ${nextEpObj.qism}-qism", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                Icon(Icons.Default.SkipNext, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        activeBottomSheet = if (activeBottomSheet == "subtitles") null else "subtitles"
+                                        lastInteractionTick++
+                                    }
+                            )
+
+                            // Icon 2: Audio Track / Sound Wave Boost
+                            Icon(
+                                imageVector = Icons.Default.GraphicEq,
+                                contentDescription = "Audio Oqim",
+                                tint = if (activeBottomSheet == "audio" || audioBoostEnabled) PrimaryGlow else Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        activeBottomSheet = if (activeBottomSheet == "audio") null else "audio"
+                                        lastInteractionTick++
+                                    }
+                            )
+
+                            // Icon 3: Playback Speedometer
+                            Icon(
+                                imageVector = Icons.Default.Speed,
+                                contentDescription = "Tezlik",
+                                tint = if (activeBottomSheet == "speed" || playbackSpeed != 1.0f) PrimaryGlow else Color.White,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .bounceClick {
+                                        activeBottomSheet = if (activeBottomSheet == "speed") null else "speed"
+                                        lastInteractionTick++
+                                    }
+                            )
+                        }
+                    }
+
+                    // Full-Width Thick Pill Progress Bar (Exact match to photo: clean white fill on grey track, no thumb circle)
+                    val progressFraction = if (isDraggingSeek) {
+                        dragSeekFraction
+                    } else if (duration > 0L) {
+                        (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+
+                    val bufferedFraction = if (duration > 0L) {
+                        (bufferedPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(20.dp)
+                            .pointerInput(duration) {
+                                detectTapGestures { offset ->
+                                    if (duration > 0L) {
+                                        val frac = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        val targetMs = (frac * duration).toLong()
+                                        exoPlayer.seekTo(targetMs)
+                                        currentPosition = targetMs
+                                        lastInteractionTick++
+                                    }
+                                }
+                            }
+                            .pointerInput(duration) {
+                                detectHorizontalDragGestures(
+                                    onDragStart = { offset ->
+                                        isDraggingSeek = true
+                                        dragSeekFraction = (offset.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        lastInteractionTick++
+                                    },
+                                    onHorizontalDrag = { change, _ ->
+                                        change.consume()
+                                        dragSeekFraction = (change.position.x / size.width.toFloat()).coerceIn(0f, 1f)
+                                        lastInteractionTick++
+                                    },
+                                    onDragEnd = {
+                                        if (duration > 0L) {
+                                            val targetMs = (dragSeekFraction * duration).toLong()
+                                            exoPlayer.seekTo(targetMs)
+                                            currentPosition = targetMs
+                                        }
+                                        isDraggingSeek = false
+                                        lastInteractionTick++
+                                    },
+                                    onDragCancel = {
+                                        isDraggingSeek = false
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (isDraggingSeek) 10.dp else 7.dp)
+                        ) {
+                            val r = CornerRadius(size.height / 2f, size.height / 2f)
+                            // Background translucent track
+                            drawRoundRect(
+                                color = Color(0x52FFFFFF),
+                                size = size,
+                                cornerRadius = r
+                            )
+                            // Buffered track
+                            val bufW = size.width * bufferedFraction
+                            if (bufW > 0f) {
+                                drawRoundRect(
+                                    color = Color(0x38FFFFFF),
+                                    size = Size(bufW, size.height),
+                                    cornerRadius = r
+                                )
+                            }
+                            // Active solid white progress fill
+                            val actW = size.width * progressFraction
+                            if (actW > 0f) {
+                                drawRoundRect(
+                                    color = Color.White,
+                                    size = Size(actW, size.height),
+                                    cornerRadius = r
+                                )
                             }
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Time & Neon Slider Row
+                    // Bottom Pills Row: [Info]   [InSight]   [Continue Watching]
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        val displayPos = if (isUserDraggingSlider) sliderDragPosition.toLong() else currentPosition
-                        Text(
-                            text = formatDurationMs(displayPos),
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
+                        GlassBottomPill(
+                            text = "Info",
+                            isSelected = activeBottomSheet == "info",
+                            onClick = {
+                                activeBottomSheet = if (activeBottomSheet == "info") null else "info"
+                                lastInteractionTick++
+                            }
                         )
 
-                        Slider(
-                            value = if (isUserDraggingSlider) sliderDragPosition else currentPosition.toFloat(),
-                            onValueChange = { newVal ->
-                                isUserDraggingSlider = true
-                                sliderDragPosition = newVal
+                        GlassBottomPill(
+                            text = "InSight",
+                            isSelected = activeBottomSheet == "insight",
+                            onClick = {
+                                activeBottomSheet = if (activeBottomSheet == "insight") null else "insight"
                                 lastInteractionTick++
-                            },
-                            onValueChangeFinished = {
-                                exoPlayer.seekTo(sliderDragPosition.toLong())
-                                currentPosition = sliderDragPosition.toLong()
-                                isUserDraggingSlider = false
-                                lastInteractionTick++
-                            },
-                            valueRange = 0f..max(1f, duration.toFloat()),
-                            colors = SliderDefaults.colors(
-                                thumbColor = PrimaryGlow,
-                                activeTrackColor = PrimaryBlue,
-                                inactiveTrackColor = Color(0x44FFFFFF)
-                            ),
-                            modifier = Modifier.weight(1f)
+                            }
                         )
 
-                        Text(
-                            text = formatDurationMs(duration),
-                            color = TextMuted,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
+                        GlassBottomPill(
+                            text = "Continue Watching",
+                            isSelected = activeBottomSheet == "continue",
+                            onClick = {
+                                activeBottomSheet = if (activeBottomSheet == "continue") null else "continue"
+                                lastInteractionTick++
+                            }
                         )
+                    }
+                }
+            }
+        }
+
+        // 4. Interactive Liquid Glass Popover Card for [Info / InSight / Continue Watching / Subtitles / Audio / Speed]
+        AnimatedVisibility(
+            visible = activeBottomSheet != null,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
+            exit = fadeOut(tween(150)) + slideOutVertically(tween(180)) { it / 2 },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 26.dp, vertical = 72.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 210.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xE6282624),
+                                Color(0xF2181715)
+                            )
+                        )
+                    )
+                    .border(1.dp, GlassBorderBrush, RoundedCornerShape(24.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {}
+                    .padding(18.dp)
+            ) {
+                when (activeBottomSheet) {
+                    "info" -> {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            if (animeDetail != null) {
+                                AsyncImage(
+                                    model = animeDetail!!.displayPoster(),
+                                    contentDescription = animeBaseTitle,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .width(84.dp)
+                                        .height(120.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .border(0.8.dp, Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                                )
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = animeBaseTitle,
+                                        color = Color.White,
+                                        fontSize = 17.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "★ ${animeDetail?.displayRating() ?: "9.2"} • ${animeDetail?.displayYear() ?: "2026"}",
+                                        color = Color(0xCCFFFFFF),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                Text(
+                                    text = animeDetail?.displayDescription()
+                                        ?: "$animeBaseTitle — $currentEpNum-qism. Yuqori sifatli HD striming.",
+                                    color = Color(0xBBFFFFFF),
+                                    fontSize = 12.5.sp,
+                                    lineHeight = 18.sp
+                                )
+                            }
+                        }
+                    }
+
+                    "insight" -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "InSight • Sahna va Oqim Ma'lumotlari",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                InSightBadge(
+                                    label = "Janrlar",
+                                    value = animeDetail?.displayGenres()?.replaceFirstChar { it.uppercase() }?.ifBlank { "Anime, Ekshn" } ?: "Anime, Ekshn",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                InSightBadge(
+                                    label = "Video Sifati",
+                                    value = "Full HD 1080p • 60fps",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                InSightBadge(
+                                    label = "Ovoz Studiyasi",
+                                    value = "DarkMora O'zbekcha Dublyaj",
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    "continue" -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "Continue Watching • Qismlar (${episodes.size})",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (episodes.isEmpty()) {
+                                Text(
+                                    text = "Hozircha faqat joriy $currentEpNum-qism mavjud.",
+                                    color = Color(0xAAFFFFFF),
+                                    fontSize = 13.sp
+                                )
+                            } else {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(episodes) { ep ->
+                                        val isCurrent = ep.qism == currentEpNum
+                                        Box(
+                                            modifier = Modifier
+                                                .bounceClick { switchEpisode(ep) }
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(if (isCurrent) Color.White else Color(0x44FFFFFF))
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = if (isCurrent) Color.White else Color(0x28FFFFFF),
+                                                    shape = RoundedCornerShape(16.dp)
+                                                )
+                                                .padding(horizontal = 18.dp, vertical = 12.dp)
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "${ep.qism}-qism",
+                                                    color = if (isCurrent) Color.Black else Color.White,
+                                                    fontSize = 13.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Text(
+                                                    text = if (isCurrent) "Ijroda" else "Ko'rish",
+                                                    color = if (isCurrent) Color(0xCC000000) else Color(0xAAFFFFFF),
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    "subtitles" -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Subtitr va Yozuvlar", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                listOf("O'zbekcha (Original)", "O'chirilgan").forEach { opt ->
+                                    val selected = subtitleState == opt
+                                    GlassBottomPill(
+                                        text = opt,
+                                        isSelected = selected,
+                                        onClick = {
+                                            subtitleState = opt
+                                            activeBottomSheet = null
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    "audio" -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Audio va Tovush Kuchaytirgich", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                GlassBottomPill(
+                                    text = "Standart Stereo",
+                                    isSelected = !audioBoostEnabled,
+                                    onClick = {
+                                        audioBoostEnabled = false
+                                        exoPlayer.volume = volumeFraction
+                                        activeBottomSheet = null
+                                    }
+                                )
+                                GlassBottomPill(
+                                    text = "Ovozni kuchaytirish (Dialogue Boost)",
+                                    isSelected = audioBoostEnabled,
+                                    onClick = {
+                                        audioBoostEnabled = true
+                                        exoPlayer.volume = 1.0f
+                                        activeBottomSheet = null
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    "speed" -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Ijro Tezligi (Playback Speed)", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
+                                    GlassBottomPill(
+                                        text = "${spd}x",
+                                        isSelected = playbackSpeed == spd,
+                                        onClick = {
+                                            playbackSpeed = spd
+                                            exoPlayer.playbackParameters = PlaybackParameters(spd)
+                                            activeBottomSheet = null
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -732,103 +1155,11 @@ fun PlayerScreen(
         // 5. Buffering Indicator when controls are hidden
         if (isBuffering && !showControls && errorMessage == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = PrimaryGlow, strokeWidth = 3.dp, modifier = Modifier.size(44.dp))
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.8.dp, modifier = Modifier.size(42.dp))
             }
         }
 
-        // 6. In-Player Liquid Glass Episodes Drawer
-        AnimatedVisibility(
-            visible = showEpisodesDrawer,
-            enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
-            exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
-            modifier = Modifier.align(Alignment.CenterEnd)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .width(290.dp)
-                    .background(Color(0xF20B0E1A))
-                    .border(1.dp, Color(0x28FFFFFF))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null
-                    ) {}
-                    .padding(16.dp)
-            ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Qismlar (${episodes.size})",
-                            color = Color.White,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
-                        )
-                        IconButton(onClick = { showEpisodesDrawer = false }, modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Yopish", tint = TextMuted)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        items(episodes) { ep ->
-                            val isCurrent = ep.qism == currentEpNum
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isCurrent) PrimaryBlue else Color(0xFF14192B))
-                                    .border(
-                                        width = 1.dp,
-                                        color = if (isCurrent) PrimaryGlow else Color(0x1FFFFFFF),
-                                        shape = RoundedCornerShape(12.dp)
-                                    )
-                                    .clickable { switchEpisode(ep) }
-                                    .padding(horizontal = 14.dp, vertical = 11.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isCurrent) Icons.Default.Equalizer else Icons.Default.PlayArrow,
-                                        contentDescription = null,
-                                        tint = if (isCurrent) Color.White else PrimaryGlow,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Text(
-                                        text = "${ep.qism}-qism",
-                                        color = Color.White,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                if (isCurrent) {
-                                    Text(
-                                        text = "Ijroda",
-                                        color = Color.White,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 7. Error Overlay
+        // 6. Error Overlay
         errorMessage?.let { error ->
             Box(
                 modifier = Modifier
@@ -840,16 +1171,16 @@ fun PlayerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(Color(0xFF101424))
-                        .border(1.dp, CardBorder, RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(GlassFill)
+                        .border(1.dp, GlassBorderBrush, RoundedCornerShape(24.dp))
                         .padding(28.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.ErrorOutline,
                         contentDescription = null,
-                        tint = RedBadge,
-                        modifier = Modifier.size(42.dp)
+                        tint = Color.White,
+                        modifier = Modifier.size(40.dp)
                     )
 
                     Text(
@@ -860,26 +1191,21 @@ fun PlayerScreen(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        OutlinedButton(
-                            onClick = onBackClick,
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Orqaga", color = TextMuted)
-                        }
+                        GlassBottomPill(
+                            text = "Orqaga",
+                            isSelected = false,
+                            onClick = onBackClick
+                        )
 
-                        Button(
+                        GlassBottomPill(
+                            text = "Qayta yuklash",
+                            isSelected = true,
                             onClick = {
                                 errorMessage = null
                                 isBuffering = true
                                 retryKey++
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Qayta yuklash", color = Color.White, fontWeight = FontWeight.Bold)
-                        }
+                            }
+                        )
                     }
                 }
             }
@@ -888,23 +1214,55 @@ fun PlayerScreen(
 }
 
 @Composable
-private fun GlassPlayerChip(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
+private fun GlassBottomPill(
+    text: String,
+    isSelected: Boolean,
     onClick: () -> Unit
 ) {
-    Row(
+    Box(
         modifier = Modifier
+            .height(38.dp)
             .bounceClick(onClick = onClick)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xBF101424))
-            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (isSelected) GlassActiveFill else GlassFill)
+            .border(
+                width = 1.dp,
+                brush = if (isSelected) {
+                    Brush.verticalGradient(listOf(Color.White, Color(0x66FFFFFF)))
+                } else {
+                    GlassBorderBrush
+                },
+                shape = RoundedCornerShape(50)
+            )
+            .padding(horizontal = 20.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = label, tint = PrimaryGlow, modifier = Modifier.size(16.dp))
-        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun InSightBadge(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0x28FFFFFF))
+            .border(0.8.dp, Color(0x22FFFFFF), RoundedCornerShape(16.dp))
+            .padding(12.dp)
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(text = label, color = Color(0x99FFFFFF), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(text = value, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
