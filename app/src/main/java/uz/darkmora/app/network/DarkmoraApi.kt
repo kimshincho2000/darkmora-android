@@ -169,6 +169,29 @@ object DarkmoraApi {
         }
     }
 
+    suspend fun submitSupportRequest(
+        token: String,
+        title: String,
+        details: String
+    ): BaseResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf(
+            "type" to "support_request",
+            "title" to title,
+            "details" to details
+        )
+        val body = gson.toJson(payload).toRequestBody(JSON_MEDIA)
+        val reqBuilder = Request.Builder()
+            .url("$BASE_URL?action=submit_user_request")
+            .post(body)
+        if (token.isNotBlank()) {
+            reqBuilder.addHeader("Authorization", "Bearer $token")
+        }
+        client.newCall(reqBuilder.build()).execute().use { response ->
+            val json = response.body?.string() ?: "{}"
+            gson.fromJson(json, BaseResponse::class.java)
+        }
+    }
+
     // --- AUTO-UPDATE METHOD ---
 
     suspend fun checkUpdate(): CheckUpdateResponse = withContext(Dispatchers.IO) {

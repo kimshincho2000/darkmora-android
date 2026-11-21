@@ -142,7 +142,11 @@ fun HomeScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = if (user != null) "Salom, ${user.getEffectiveName().substringBefore(" ")}" else "Anime olami • Full HD",
+                            text = if (user != null) {
+                                "${tr("Salom", "Hello", "Привет")}, ${user.getEffectiveName().substringBefore(" ")}"
+                            } else {
+                                tr("Anime olami • Full HD", "Anime World • Full HD", "Мир Аниме • Full HD")
+                            },
                             color = TextMuted,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,
@@ -315,9 +319,13 @@ fun HomeScreen(
 
                     // 3. TENSEII PILL TABS SWITCHER (Barchasi | Yangi Qismlar | Top Xitlar)
                     item {
-                        Spacer(modifier = Modifier.height(18.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                         PillTabs(
-                            titles = listOf("Barchasi", "Yangi Qismlar", "Top Xitlar"),
+                            titles = listOf(
+                                tr("Barchasi", "All", "Все"),
+                                tr("Yangi Qismlar", "New Episodes", "Новые серии"),
+                                tr("Top Xitlar", "Top Hits", "Топ Хиты")
+                            ),
                             selectedIndex = selectedMenuTab,
                             onSelect = { selectedMenuTab = it }
                         )
@@ -338,7 +346,7 @@ fun HomeScreen(
                                     // ALL RAILS VIEW (Staggered Entrance)
                                     Column {
                                         if (trending.isNotEmpty()) {
-                                            SectionHeader(title = "Trenddagi Animelar", onSeeAllClick = onSeeAllClick)
+                                            SectionHeader(title = tr("Trenddagi Animelar", "Trending Anime", "В тренде"), onSeeAllClick = onSeeAllClick)
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(13.dp)
@@ -355,7 +363,7 @@ fun HomeScreen(
 
                                         if (latest.isNotEmpty()) {
                                             Spacer(modifier = Modifier.height(16.dp))
-                                            SectionHeader(title = "So'nggi Qo'shilganlar", onSeeAllClick = onSeeAllClick)
+                                            SectionHeader(title = tr("So'nggi Qo'shilganlar", "Recently Added", "Недавно добавленные"), onSeeAllClick = onSeeAllClick)
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(13.dp)
@@ -372,7 +380,7 @@ fun HomeScreen(
 
                                         if (topRated.isNotEmpty()) {
                                             Spacer(modifier = Modifier.height(16.dp))
-                                            SectionHeader(title = "Yuqori Reyting", onSeeAllClick = onSeeAllClick)
+                                            SectionHeader(title = tr("Yuqori Reyting", "Top Rated", "Высокий рейтинг"), onSeeAllClick = onSeeAllClick)
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                                 horizontalArrangement = Arrangement.spacedBy(13.dp)
@@ -401,7 +409,7 @@ fun HomeScreen(
                                             ReleaseFeedRow(
                                                 anime = anime,
                                                 index = idx,
-                                                badgeText = "${anime.displayEpisodes().ifBlank { "Yangi" }} qism",
+                                                badgeText = "${anime.displayEpisodes().ifBlank { tr("Yangi", "New", "Новое") }} ${tr("qism", "ep", "сер.")}",
                                                 onClick = { onAnimeClick(anime.getEffectiveSlug()) }
                                             )
                                         }

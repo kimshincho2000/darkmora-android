@@ -96,7 +96,7 @@ fun CatalogScreen(
                 TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Anime qidirish...", color = TextDim, fontSize = 14.sp) },
+                    placeholder = { Text(tr("Anime qidirish...", "Search anime...", "Поиск аниме..."), color = TextDim, fontSize = 14.sp) },
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
                         unfocusedContainerColor = Color.Transparent,

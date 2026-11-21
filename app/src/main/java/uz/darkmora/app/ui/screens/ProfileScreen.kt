@@ -181,7 +181,7 @@ fun ProfileScreen(
             .padding(top = 14.dp, bottom = 120.dp)
     ) {
         // ====================================================================
-        // CENTERED TOP TITLE ("Profile" - 1:1 AS IN PHOTO)
+        // CENTERED TOP TITLE ("Profile" - 1:1 AS IN PHOTO, LOCALIZED)
         // ====================================================================
         Box(
             modifier = Modifier
@@ -190,7 +190,7 @@ fun ProfileScreen(
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = "Profile",
+                text = tr("Profil", "Profile", "Профиль"),
                 color = TextPrimary,
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold
@@ -203,13 +203,13 @@ fun ProfileScreen(
         // TOP PROFILE CARD (Avatar Circle on Left + Name & Email/Subtext on Right)
         // ====================================================================
         val u = user
-        val displayName = if (isLoggedIn && u != null) u.getEffectiveName() else "Mehmon Foydalanuvchi"
+        val displayName = if (isLoggedIn && u != null) u.getEffectiveName() else tr("Mehmon Foydalanuvchi", "Guest User", "Гость")
         val subTitle = if (isLoggedIn && u != null) {
             u.email?.takeIf { it.isNotBlank() }
                 ?: u.username?.takeIf { it.isNotBlank() }?.let { "@$it" }
                 ?: "ID: #${u.userCode ?: u.dbId ?: "100"}"
         } else {
-            "Tizimga kirish uchun bosing"
+            tr("Tizimga kirish uchun bosing", "Tap to sign in", "Нажмите, чтобы войти")
         }
 
         Box(
@@ -319,7 +319,7 @@ fun ProfileScreen(
                             .padding(horizontal = 14.dp, vertical = 7.dp)
                     ) {
                         Text(
-                            text = "Kirish",
+                            text = tr("Kirish", "Sign In", "Войти"),
                             color = BgSurface,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -332,10 +332,10 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(22.dp))
 
         // ====================================================================
-        // SECTION 1: ACCOUNT (1:1 AS IN PHOTO)
+        // SECTION 1: ACCOUNT (1:1 AS IN PHOTO, REACTIVE TO LANGUAGE)
         // ====================================================================
         Text(
-            text = "Account",
+            text = tr("Akkaunt", "Account", "Аккаунт"),
             color = TextMuted,
             fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
@@ -354,8 +354,8 @@ fun ProfileScreen(
         ) {
             CleanProfileRow(
                 icon = Icons.Outlined.AccountCircle,
-                title = "Manage Profile",
-                trailingText = if (isLoggedIn) "Tahrirlash" else "Kirish",
+                title = tr("Profilni boshqarish", "Manage Profile", "Управление профилем"),
+                trailingText = if (isLoggedIn) tr("Tahrirlash", "Edit", "Изменить") else tr("Kirish", "Sign In", "Войти"),
                 onClick = {
                     if (isLoggedIn) showManageProfileDialog = true else showAuthDialog = true
                 }
@@ -364,7 +364,7 @@ fun ProfileScreen(
 
             CleanProfileRow(
                 icon = Icons.Outlined.Lock,
-                title = "Password & Security",
+                title = tr("Parol va Xavfsizlik", "Password & Security", "Пароль и безопасность"),
                 onClick = {
                     if (isLoggedIn) showPasswordDialog = true else showAuthDialog = true
                 }
@@ -373,16 +373,16 @@ fun ProfileScreen(
 
             CleanProfileRow(
                 icon = Icons.Outlined.Notifications,
-                title = "Notifications",
-                trailingText = if (unreadNotifs > 0) "$unreadNotifs yangi" else null,
+                title = tr("Bildirishnomalar", "Notifications", "Уведомления"),
+                trailingText = if (unreadNotifs > 0) "$unreadNotifs ${tr("yangi", "new", "новых")}" else null,
                 onClick = { showNotificationsDialog = true }
             )
             ProfileRowDivider()
 
             CleanProfileRow(
                 icon = Icons.Outlined.Translate,
-                title = "Language",
-                trailingText = currentLang,
+                title = tr("Ilova tili", "Language", "Язык"),
+                trailingText = AppThemeState.language,
                 onClick = { showLanguageDialog = true }
             )
         }
@@ -390,10 +390,10 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(22.dp))
 
         // ====================================================================
-        // SECTION 2: PREFERENCES (1:1 AS IN PHOTO)
+        // SECTION 2: PREFERENCES (1:1 AS IN PHOTO, REACTIVE TO LANGUAGE)
         // ====================================================================
         Text(
-            text = "Preferences",
+            text = tr("Sozlamalar", "Preferences", "Настройки"),
             color = TextMuted,
             fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
@@ -410,24 +410,24 @@ fun ProfileScreen(
         ) {
             CleanProfileRow(
                 icon = Icons.Outlined.ListAlt,
-                title = "About Us",
-                trailingText = "v2.5.2",
+                title = tr("Ilova haqida", "About Us", "О приложении"),
+                trailingText = "v2.5.3",
                 onClick = { showAboutDialog = true }
             )
             ProfileRowDivider()
 
             CleanProfileRow(
                 icon = Icons.Outlined.Contrast,
-                title = "Theme",
-                trailingText = if (AppThemeState.isDark) "Dark" else "Light",
+                title = tr("Mavzu", "Theme", "Тема"),
+                trailingText = if (AppThemeState.isDark) tr("Tungi", "Dark", "Тёмная") else tr("Tonggi", "Light", "Светлая"),
                 onClick = { showThemeDialog = true }
             )
             ProfileRowDivider()
 
             CleanProfileRow(
                 icon = Icons.Outlined.CalendarMonth,
-                title = "Appointments & Favorites",
-                trailingText = "${sessionManager.getFavorites().size} ta",
+                title = tr("Sevimlilar ro'yxati", "Appointments & Favorites", "Избранное"),
+                trailingText = "${sessionManager.getFavorites().size} ${tr("ta", "items", "шт.")}",
                 onClick = onNavigateToFavorites
             )
         }
@@ -435,10 +435,10 @@ fun ProfileScreen(
         Spacer(modifier = Modifier.height(22.dp))
 
         // ====================================================================
-        // SECTION 3: SUPPORT (1:1 AS IN PHOTO)
+        // SECTION 3: SUPPORT (1:1 AS IN PHOTO, REACTIVE TO LANGUAGE)
         // ====================================================================
         Text(
-            text = "Support",
+            text = tr("Qo'llab-quvvatlash", "Support", "Поддержка"),
             color = TextMuted,
             fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
@@ -455,15 +455,15 @@ fun ProfileScreen(
         ) {
             CleanProfileRow(
                 icon = Icons.Outlined.HelpOutline,
-                title = "Help Center",
+                title = tr("Yordam markazi", "Help Center", "Центр помощи"),
                 onClick = { showHelpDialog = true }
             )
             ProfileRowDivider()
 
             CleanProfileRow(
                 icon = Icons.Outlined.SystemUpdate,
-                title = "Check for Updates",
-                trailingText = if (isCheckingUpdate) "..." else "v2.5.2",
+                title = tr("Yangilanishni tekshirish", "Check for Updates", "Проверить обновления"),
+                trailingText = if (isCheckingUpdate) "..." else "v2.5.3",
                 onClick = {
                     if (!isCheckingUpdate) {
                         isCheckingUpdate = true
@@ -471,11 +471,19 @@ fun ProfileScreen(
                             try {
                                 val res = DarkmoraApi.checkUpdate()
                                 if (res.ok && res.data != null) {
-                                    if (res.data.versionCode > 19) {
+                                    if (res.data.versionCode > 20) {
                                         updateInfo = res.data
                                         showUpdateDialog = true
                                     } else {
-                                        Toast.makeText(context, "Sizda eng so'nggi versiya o'rnatilgan (v2.5.2)", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            context,
+                                            tr(
+                                                "Sizda eng so'nggi versiya o'rnatilgan (v2.5.3)",
+                                                "You have the latest version installed (v2.5.3)",
+                                                "У вас установлена последняя версия (v2.5.3)"
+                                            ),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 } else {
                                     Toast.makeText(context, "Versiya tekshirishda xatolik", Toast.LENGTH_SHORT).show()
@@ -494,12 +502,16 @@ fun ProfileScreen(
                 ProfileRowDivider()
                 CleanProfileRow(
                     icon = Icons.Outlined.Logout,
-                    title = "Log Out",
+                    title = tr("Akkauntdan chiqish", "Log Out", "Выйти"),
                     titleColor = RedBadge,
                     onClick = {
                         sessionManager.clearSession()
                         refreshUserData()
-                        Toast.makeText(context, "Akkauntdan chiqildi", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            tr("Akkauntdan chiqildi", "Logged out", "Вы вышли из аккаунта"),
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 )
             }
@@ -806,7 +818,7 @@ fun ProfileScreen(
         }
     }
 
-    // 5. Language Selector Dialog
+    // 5. Language Selector Dialog (Instantly updates AppThemeState.language across the entire app!)
     if (showLanguageDialog) {
         Dialog(onDismissRequest = { showLanguageDialog = false }) {
             Box(
@@ -818,9 +830,14 @@ fun ProfileScreen(
                     .padding(22.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Tilni tanlang (Language)", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = tr("Tilni tanlang", "Select Language", "Выберите язык"),
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     listOf("O'zbekcha", "English", "Русский").forEach { lang ->
-                        val selected = currentLang == lang
+                        val selected = AppThemeState.language == lang
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -829,6 +846,7 @@ fun ProfileScreen(
                                 .border(1.dp, if (selected) PrimaryBlue else CardBorder, RoundedCornerShape(14.dp))
                                 .clickable {
                                     currentLang = lang
+                                    AppThemeState.language = lang
                                     sessionManager.setLanguage(lang)
                                     showLanguageDialog = false
                                 }
@@ -859,31 +877,44 @@ fun ProfileScreen(
                     .padding(22.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("About DarkMora", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        text = "DarkMora (v2.5.0) — O'zbek tilidagi eng sara animelar, kinolar va seriallarni yuqori Full HD sifatda reklamalarsiz tomosha qilish uchun yaratilgan rasmiy mobil ilova.",
+                        text = tr("DarkMora haqida", "About DarkMora", "О DarkMora"),
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = tr(
+                            "DarkMora (v2.5.3) — O'zbek tilidagi eng sara animelar, kinolar va seriallarni yuqori Full HD sifatda reklamalarsiz tomosha qilish uchun yaratilgan rasmiy mobil ilova.",
+                            "DarkMora (v2.5.3) — Official mobile streaming platform for watching top anime, movies, and series in Full HD quality without ads.",
+                            "DarkMora (v2.5.3) — Официальное мобильное приложение для просмотра лучших аниме, фильмов и сериалов в Full HD качестве без рекламы."
+                        ),
                         color = TextMuted,
                         fontSize = 13.5.sp,
                         lineHeight = 20.sp
                     )
                     Button(
                         onClick = {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://cache.CleanCache".let { "https://darkmora.uz" })))
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://darkmora.uz")))
                             showAboutDialog = false
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
                         shape = RoundedCornerShape(50)
                     ) {
-                        Text("Rasmiy sayt: darkmora.uz", color = BgSurface, fontWeight = FontWeight.Bold)
+                        Text(tr("Rasmiy sayt: darkmora.uz", "Official Website: darkmora.uz", "Официальный сайт: darkmora.uz"), color = BgSurface, fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
     }
 
-    // 7. Help Center Dialog
+    // 7. Interactive Help Center & Support Request Submission Dialog
     if (showHelpDialog) {
+        var reqTitle by remember { mutableStateOf("") }
+        var reqDetails by remember { mutableStateOf("") }
+        var isSubmittingReq by remember { mutableStateOf(false) }
+
         Dialog(onDismissRequest = { showHelpDialog = false }) {
             Box(
                 modifier = Modifier
@@ -894,13 +925,90 @@ fun ProfileScreen(
                     .padding(22.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Help Center & Yordam", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        text = "Savollar, takliflar yoki texnik muammolar bo'yicha rasmiy Telegram qo'llab-quvvatlash botimizga murojaat qilishingiz mumkin.",
-                        color = TextMuted,
-                        fontSize = 13.5.sp,
-                        lineHeight = 20.sp
+                        text = tr("Yordam markazi & Murojaat", "Help Center & Support", "Центр помощи и обращение"),
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
                     )
+                    Text(
+                        text = tr(
+                            "Yangi anime buyurtma qilish yoki muammo haqida xabar yuborish:",
+                            "Request a new anime or report a technical issue directly to admins:",
+                            "Заказать новое аниме или сообщить о проблеме:"
+                        ),
+                        color = TextMuted,
+                        fontSize = 12.5.sp
+                    )
+
+                    OutlinedTextField(
+                        value = reqTitle,
+                        onValueChange = { reqTitle = it },
+                        label = { Text(tr("Anime nomi yoki mavzu", "Anime title or subject", "Название аниме или тема")) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryBlue,
+                            unfocusedBorderColor = CardBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = reqDetails,
+                        onValueChange = { reqDetails = it },
+                        label = { Text(tr("Xabar matni / Izoh", "Message details", "Текст сообщения")) },
+                        maxLines = 3,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = PrimaryBlue,
+                            unfocusedBorderColor = CardBorder
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Button(
+                        onClick = {
+                            if (reqTitle.isBlank()) {
+                                Toast.makeText(context, tr("Sarlavhani kiriting", "Enter subject", "Введите тему"), Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            isSubmittingReq = true
+                            scope.launch {
+                                try {
+                                    val tok = sessionManager.getToken() ?: ""
+                                    val res = DarkmoraApi.submitSupportRequest(tok, reqTitle.trim(), reqDetails.trim())
+                                    if (res.ok) {
+                                        Toast.makeText(
+                                            context,
+                                            tr("So'rovingiz adminlarga yuborildi!", "Your request has been sent!", "Ваш запрос отправлен!"),
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                        showHelpDialog = false
+                                    } else {
+                                        Toast.makeText(context, res.error ?: "Xatolik", Toast.LENGTH_SHORT).show()
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
+                                } finally {
+                                    isSubmittingReq = false
+                                }
+                            }
+                        },
+                        enabled = !isSubmittingReq,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = TextPrimary),
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text(
+                            text = if (isSubmittingReq) "..." else tr("Adminlarga yuborish", "Send Request", "Отправить"),
+                            color = BgSurface,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -908,13 +1016,17 @@ fun ProfileScreen(
                         OutlinedButton(
                             onClick = {
                                 context.cacheDir.deleteRecursively()
-                                Toast.makeText(context, "Kesh tozalandi!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    context,
+                                    tr("Kesh tozalandi!", "Cache cleared!", "Кэш очищен!"),
+                                    Toast.LENGTH_SHORT
+                                ).show()
                                 showHelpDialog = false
                             },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(50)
                         ) {
-                            Text("Keshni tozalash", color = TextPrimary, fontSize = 12.5.sp)
+                            Text(tr("Keshni tozalash", "Clear Cache", "Очистить кэш"), color = TextPrimary, fontSize = 12.sp)
                         }
                         Button(
                             onClick = {
@@ -925,7 +1037,7 @@ fun ProfileScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlue),
                             shape = RoundedCornerShape(50)
                         ) {
-                            Text("Telegram Bot", color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            Text("Telegram Bot", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

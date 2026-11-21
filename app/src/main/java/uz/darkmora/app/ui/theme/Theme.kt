@@ -1,12 +1,14 @@
 package uz.darkmora.app.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -47,6 +49,14 @@ fun DarkMoraTheme(
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
+                val topBarColor = palette.bgPrimary.toArgb()
+                val bottomNavColor = palette.navBarBg.toArgb()
+                window.statusBarColor = topBarColor
+                window.navigationBarColor = bottomNavColor
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    window.isStatusBarContrastEnforced = false
+                    window.isNavigationBarContrastEnforced = false
+                }
                 WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = !isDarkTheme
                     isAppearanceLightNavigationBars = !isDarkTheme

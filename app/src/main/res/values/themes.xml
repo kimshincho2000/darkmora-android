@@ -1,7 +1,7 @@
 <resources>
     <style name="Theme.DarkMora" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#08090E</item>
-        <item name="android:statusBarColor">#08090E</item>
-        <item name="android:navigationBarColor">#08090E</item>
+        <item name="android:windowBackground">#0A0B10</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

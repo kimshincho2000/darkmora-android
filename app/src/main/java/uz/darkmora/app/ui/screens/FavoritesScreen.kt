@@ -74,7 +74,7 @@ fun FavoritesScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Sevimlilar",
+                text = tr("Sevimlilar", "Favorites", "Избранное"),
                 color = TextPrimary,
                 fontSize = 23.sp,
                 fontWeight = FontWeight.Bold
@@ -88,7 +88,7 @@ fun FavoritesScreen(
                     .padding(horizontal = 12.dp, vertical = 5.dp)
             ) {
                 Text(
-                    text = "${favoriteList.size} ta",
+                    text = "${favoriteList.size} ${tr("ta", "items", "шт.")}",
                     color = TextPrimary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold
@@ -126,13 +126,17 @@ fun FavoritesScreen(
                         )
                     }
                     Text(
-                        text = "Sevimlilar ro'yxati bo'sh",
+                        text = tr("Sevimlilar ro'yxati bo'sh", "Favorites list is empty", "Список избранного пуст"),
                         color = TextPrimary,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Yoqtirgan animelaringiz sahifasidagi saqlash tugmasini bosib, ularni shu yerga qo'shishingiz mumkin.",
+                        text = tr(
+                            "Yoqtirgan animelaringiz sahifasidagi saqlash tugmasini bosib, ularni shu yerga qo'shishingiz mumkin.",
+                            "Tap the bookmark icon on any anime page to save your favorite titles here.",
+                            "Нажмите кнопку закладки на странице аниме, чтобы добавить его сюда."
+                        ),
                         color = TextMuted,
                         fontSize = 13.sp,
                         textAlign = TextAlign.Center,
@@ -146,7 +150,7 @@ fun FavoritesScreen(
                     ) {
                         Icon(Icons.Default.Explore, contentDescription = null, tint = BgSurface)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Katalogga o'tish", color = BgSurface, fontWeight = FontWeight.Bold)
+                        Text(tr("Katalogga o'tish", "Explore Catalog", "Перейти в каталог"), color = BgSurface, fontWeight = FontWeight.Bold)
                     }
                 }
             }

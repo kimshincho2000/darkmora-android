@@ -510,7 +510,6 @@ fun HeroCarousel(
 
     val pagerState = rememberPagerState(pageCount = { items.size })
 
-    // Periodic shimmer sweep across the "Ko'rish" button (inspired by Tenseii shine animation)
     val shineTransition = rememberInfiniteTransition(label = "heroShine")
     val shineOffset by shineTransition.animateFloat(
         initialValue = -200f,
@@ -539,34 +538,25 @@ fun HeroCarousel(
             .padding(top = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // Full-width single card per page (only 1 card visible at a time — clean, uncluttered!)
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(horizontal = 18.dp),
-            pageSpacing = 12.dp,
+            pageSpacing = 16.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(325.dp)
+                .height(315.dp)
         ) { page ->
             val anime = items[page]
-            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(-1f, 1f)
-            val absOffset = abs(pageOffset)
-            val cardScale = lerp(0.95f, 1f, 1f - absOffset)
-            val cardAlpha = lerp(0.75f, 1f, 1f - absOffset)
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = cardScale
-                        scaleY = cardScale
-                        alpha = cardAlpha
-                    }
+                    .padding(horizontal = 18.dp)
                     .clip(RoundedCornerShape(26.dp))
                     .background(BgCard)
                     .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
                     .clickable { onAnimeClick(anime.getEffectiveSlug()) }
             ) {
-                // Full-Card Poster / Banner (No unclipped translationX so it never spills out of rounded card)
                 AsyncImage(
                     model = anime.banner ?: anime.displayPoster(),
                     contentDescription = anime.displayTitle(),
@@ -581,8 +571,8 @@ fun HeroCarousel(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0x22000000),
-                                    Color(0x44000000),
+                                    Color(0x28000000),
+                                    Color(0x4D000000),
                                     Color(0xD908090F),
                                     Color(0xF508090F)
                                 )
@@ -605,7 +595,7 @@ fun HeroCarousel(
                             .padding(horizontal = 11.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "TOP PREMYERA",
+                            text = tr("TOP PREMYERA", "TOP PREMIERE", "ТОП ПРЕМЬЕРА"),
                             color = Color(0xFF0A0B10),
                             fontSize = 9.5.sp,
                             fontWeight = FontWeight.ExtraBold,
@@ -660,7 +650,7 @@ fun HeroCarousel(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Action Buttons Row (Proportional width so both buttons fit cleanly inside card without clipping)
+                    // Action Buttons Row (Both buttons fit 100% cleanly inside the single full-width card!)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -692,7 +682,7 @@ fun HeroCarousel(
                             ) {
                                 Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF0A0B10), modifier = Modifier.size(18.dp))
                                 Text(
-                                    text = "Tomosha qilish",
+                                    text = tr("Tomosha qilish", "Watch Now", "Смотреть"),
                                     color = Color(0xFF0A0B10),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
@@ -717,7 +707,7 @@ fun HeroCarousel(
                             ) {
                                 Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                                 Text(
-                                    text = "Batafsil",
+                                    text = tr("Batafsil", "Details", "Подробнее"),
                                     color = Color.White,
                                     fontSize = 12.5.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -849,7 +839,7 @@ fun SectionHeader(
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 Text(
-                    text = "Barchasi",
+                    text = tr("Barchasi", "See All", "Все"),
                     color = TextMuted,
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.SemiBold

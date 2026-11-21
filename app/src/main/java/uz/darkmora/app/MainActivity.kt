@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val sessionManager = UserSessionManager(this)
         AppThemeState.isDark = sessionManager.isDarkMode()
+        AppThemeState.language = sessionManager.getLanguage()
 
         pendingTargetSlug = intent?.getStringExtra("target_anime_slug")
         DarkmoraNotificationHelper.schedulePeriodicCheck(this)
@@ -129,7 +130,7 @@ fun MainApp(
 
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 19) {
+            if (res.ok && res.data != null && res.data.versionCode > 20) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }

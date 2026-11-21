@@ -6,9 +6,18 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-// Global reactive theme state (persisted via UserSessionManager)
+// Global reactive theme & language state (persisted via UserSessionManager)
 object AppThemeState {
     var isDark by mutableStateOf(true)
+    var language by mutableStateOf("O'zbekcha")
+}
+
+fun tr(uz: String, en: String, ru: String): String {
+    return when (AppThemeState.language) {
+        "English" -> en
+        "Русский" -> ru
+        else -> uz
+    }
 }
 
 data class DarkMoraColors(
