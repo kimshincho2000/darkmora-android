@@ -130,7 +130,7 @@ fun MainApp(
 
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 20) {
+            if (res.ok && res.data != null && res.data.versionCode > 21) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }

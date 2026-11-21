@@ -713,7 +713,7 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             Text(
-                                text = "$currentEpNum-qism • ${formatDurationMs(currentPosition)} / ${formatDurationMs(duration)}",
+                                text = "$currentEpNum-${tr("qism", "ep", "сер.")} • ${formatDurationMs(currentPosition)} / ${formatDurationMs(duration)}",
                                 color = Color(0xCCFFFFFF),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -873,13 +873,13 @@ fun PlayerScreen(
                         }
                     }
 
-                    // Bottom Pills Row: [Info]   [InSight]   [Continue Watching]
+                    // Bottom Pills Row: [Ma'lumot]   [Tafsilotlar]   [Qismlar ro'yxati]
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         GlassBottomPill(
-                            text = "Info",
+                            text = tr("Ma'lumot", "Info", "Инфо"),
                             isSelected = activeBottomSheet == "info",
                             onClick = {
                                 activeBottomSheet = if (activeBottomSheet == "info") null else "info"
@@ -888,7 +888,7 @@ fun PlayerScreen(
                         )
 
                         GlassBottomPill(
-                            text = "InSight",
+                            text = tr("Tafsilotlar", "InSight", "Детали"),
                             isSelected = activeBottomSheet == "insight",
                             onClick = {
                                 activeBottomSheet = if (activeBottomSheet == "insight") null else "insight"
@@ -897,7 +897,7 @@ fun PlayerScreen(
                         )
 
                         GlassBottomPill(
-                            text = "Continue Watching",
+                            text = tr("Qismlar ro'yxati", "Continue Watching", "Список серий"),
                             isSelected = activeBottomSheet == "continue",
                             onClick = {
                                 activeBottomSheet = if (activeBottomSheet == "continue") null else "continue"
@@ -998,7 +998,7 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
-                                text = "InSight • Sahna va Oqim Ma'lumotlari",
+                                text = tr("Tafsilotlar • Sahna va Oqim Ma'lumotlari", "InSight • Scene & Stream Details", "Детали • Информация о потоке"),
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
@@ -1008,17 +1008,17 @@ fun PlayerScreen(
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 InSightBadge(
-                                    label = "Janrlar",
+                                    label = tr("Janrlar", "Genres", "Жанры"),
                                     value = animeDetail?.displayGenres()?.replaceFirstChar { it.uppercase() }?.ifBlank { "Anime, Ekshn" } ?: "Anime, Ekshn",
                                     modifier = Modifier.weight(1f)
                                 )
                                 InSightBadge(
-                                    label = "Video Sifati",
+                                    label = tr("Video Sifati", "Video Quality", "Качество видео"),
                                     value = "Full HD 1080p • 60fps",
                                     modifier = Modifier.weight(1f)
                                 )
                                 InSightBadge(
-                                    label = "Ovoz Studiyasi",
+                                    label = tr("Ovoz Studiyasi", "Audio Studio", "Студия озвучки"),
                                     value = "DarkMora O'zbekcha Dublyaj",
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1032,14 +1032,18 @@ fun PlayerScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
-                                text = "Continue Watching • Qismlar (${episodes.size})",
+                                text = "${tr("Qismlar ro'yxati", "Continue Watching", "Список серий")} (${episodes.size})",
                                 color = Color.White,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                             if (episodes.isEmpty()) {
                                 Text(
-                                    text = "Hozircha faqat joriy $currentEpNum-qism mavjud.",
+                                    text = tr(
+                                        "Hozircha faqat joriy $currentEpNum-qism mavjud.",
+                                        "Currently only episode $currentEpNum is available.",
+                                        "Сейчас доступна только $currentEpNum серия."
+                                    ),
                                     color = Color(0xAAFFFFFF),
                                     fontSize = 13.sp
                                 )
@@ -1067,13 +1071,13 @@ fun PlayerScreen(
                                                 verticalArrangement = Arrangement.spacedBy(2.dp)
                                             ) {
                                                 Text(
-                                                    text = "${ep.qism}-qism",
+                                                    text = "${ep.qism}-${tr("qism", "ep", "сер.")}",
                                                     color = if (isCurrent) Color.Black else Color.White,
                                                     fontSize = 13.5.sp,
                                                     fontWeight = FontWeight.Bold
                                                 )
                                                 Text(
-                                                    text = if (isCurrent) "Ijroda" else "Ko'rish",
+                                                    text = if (isCurrent) tr("Ijroda", "Playing", "Играет") else tr("Ko'rish", "Watch", "Смотреть"),
                                                     color = if (isCurrent) Color(0xCC000000) else Color(0xAAFFFFFF),
                                                     fontSize = 11.sp
                                                 )
@@ -1087,7 +1091,7 @@ fun PlayerScreen(
 
                     "subtitles" -> {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Subtitr va Yozuvlar", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Subtitr va Yozuvlar", "Subtitles & Captions", "Субтитры"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 listOf("O'zbekcha (Original)", "O'chirilgan").forEach { opt ->
                                     val selected = subtitleState == opt
@@ -1106,10 +1110,10 @@ fun PlayerScreen(
 
                     "audio" -> {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Audio va Tovush Kuchaytirgich", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Audio va Tovush Kuchaytirgich", "Audio & Sound Enhancer", "Аудио и усиление звука"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 GlassBottomPill(
-                                    text = "Standart Stereo",
+                                    text = tr("Standart Stereo", "Standard Stereo", "Стандартное стерео"),
                                     isSelected = !audioBoostEnabled,
                                     onClick = {
                                         audioBoostEnabled = false
@@ -1118,7 +1122,7 @@ fun PlayerScreen(
                                     }
                                 )
                                 GlassBottomPill(
-                                    text = "Ovozni kuchaytirish (Dialogue Boost)",
+                                    text = tr("Ovozni kuchaytirish", "Dialogue Boost", "Усиление голоса"),
                                     isSelected = audioBoostEnabled,
                                     onClick = {
                                         audioBoostEnabled = true
@@ -1132,7 +1136,7 @@ fun PlayerScreen(
 
                     "speed" -> {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text("Ijro Tezligi (Playback Speed)", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                            Text(tr("Ijro Tezligi", "Playback Speed", "Скорость воспроизведения"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { spd ->
                                     GlassBottomPill(

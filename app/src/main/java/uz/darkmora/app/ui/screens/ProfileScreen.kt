@@ -411,7 +411,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.ListAlt,
                 title = tr("Ilova haqida", "About Us", "О приложении"),
-                trailingText = "v2.5.3",
+                trailingText = "v2.5.4",
                 onClick = { showAboutDialog = true }
             )
             ProfileRowDivider()
@@ -463,7 +463,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.SystemUpdate,
                 title = tr("Yangilanishni tekshirish", "Check for Updates", "Проверить обновления"),
-                trailingText = if (isCheckingUpdate) "..." else "v2.5.3",
+                trailingText = if (isCheckingUpdate) "..." else "v2.5.4",
                 onClick = {
                     if (!isCheckingUpdate) {
                         isCheckingUpdate = true
@@ -471,16 +471,16 @@ fun ProfileScreen(
                             try {
                                 val res = DarkmoraApi.checkUpdate()
                                 if (res.ok && res.data != null) {
-                                    if (res.data.versionCode > 20) {
+                                    if (res.data.versionCode > 21) {
                                         updateInfo = res.data
                                         showUpdateDialog = true
                                     } else {
                                         Toast.makeText(
                                             context,
                                             tr(
-                                                "Sizda eng so'nggi versiya o'rnatilgan (v2.5.3)",
-                                                "You have the latest version installed (v2.5.3)",
-                                                "У вас установлена последняя версия (v2.5.3)"
+                                                "Sizda eng so'nggi versiya o'rnatilgan (v2.5.4)",
+                                                "You have the latest version installed (v2.5.4)",
+                                                "У вас установлена последняя версия (v2.5.4)"
                                             ),
                                             Toast.LENGTH_SHORT
                                         ).show()

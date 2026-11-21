@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -508,7 +509,7 @@ fun HeroCarousel(
     val items = remember(featuredList) { featuredList.take(6) }
     if (items.isEmpty()) return
 
-    val pagerState = rememberPagerState(pageCount = { items.size })
+    var currentIndex by remember { mutableIntStateOf(0) }
 
     val shineTransition = rememberInfiniteTransition(label = "heroShine")
     val shineOffset by shineTransition.animateFloat(
@@ -521,16 +522,15 @@ fun HeroCarousel(
         label = "shineOffset"
     )
 
-    LaunchedEffect(pagerState.currentPage, items.size) {
+    // Auto-advance every 5 seconds
+    LaunchedEffect(currentIndex, items.size) {
         if (items.size > 1) {
-            delay(5200)
-            val next = (pagerState.currentPage + 1) % items.size
-            pagerState.animateScrollToPage(
-                page = next,
-                animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
-            )
+            delay(5000)
+            currentIndex = (currentIndex + 1) % items.size
         }
     }
+
+    var dragAccum by remember { mutableFloatStateOf(0f) }
 
     Column(
         modifier = modifier
@@ -538,181 +538,204 @@ fun HeroCarousel(
             .padding(top = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Full-width single card per page (only 1 card visible at a time — clean, uncluttered!)
-        HorizontalPager(
-            state = pagerState,
-            pageSpacing = 16.dp,
+        // Single Full-Width Card with Smooth Crossfade & Swipe (Never splits or clashes with outer tab pager!)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(315.dp)
-        ) { page ->
-            val anime = items[page]
+                .padding(horizontal = 18.dp)
+                .pointerInput(items.size) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragAccum = 0f },
+                        onHorizontalDrag = { change, dragAmount ->
+                            change.consume()
+                            dragAccum += dragAmount
+                        },
+                        onDragEnd = {
+                            if (items.size > 1) {
+                                if (dragAccum < -65f) {
+                                    currentIndex = (currentIndex + 1) % items.size
+                                } else if (dragAccum > 65f) {
+                                    currentIndex = (currentIndex - 1 + items.size) % items.size
+                                }
+                            }
+                            dragAccum = 0f
+                        }
+                    )
+                }
+        ) {
+            androidx.compose.animation.Crossfade(
+                targetState = currentIndex.coerceIn(0, items.size - 1),
+                animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+                label = "heroCrossfade"
+            ) { page ->
+                val anime = items[page]
 
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 18.dp)
-                    .clip(RoundedCornerShape(26.dp))
-                    .background(BgCard)
-                    .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
-                    .clickable { onAnimeClick(anime.getEffectiveSlug()) }
-            ) {
-                AsyncImage(
-                    model = anime.banner ?: anime.displayPoster(),
-                    contentDescription = anime.displayTitle(),
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Smooth dark cinematic gradient inside the floating card
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0x28000000),
-                                    Color(0x4D000000),
-                                    Color(0xD908090F),
-                                    Color(0xF508090F)
-                                )
-                            )
-                        )
-                )
-
-                // Top Badges inside the floating card
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(BgCard)
+                        .border(1.dp, CardBorder, RoundedCornerShape(26.dp))
+                        .clickable { onAnimeClick(anime.getEffectiveSlug()) }
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color.White)
-                            .padding(horizontal = 11.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = tr("TOP PREMYERA", "TOP PREMIERE", "ТОП ПРЕМЬЕРА"),
-                            color = Color(0xFF0A0B10),
-                            fontSize = 9.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 0.5.sp
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(Color(0xBF12141E))
-                            .border(0.8.dp, Color(0x28FFFFFF), RoundedCornerShape(50))
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(Icons.Default.Star, contentDescription = null, tint = RatingGold, modifier = Modifier.size(12.dp))
-                        Text(anime.displayRating(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("•", color = Color(0x99FFFFFF), fontSize = 11.sp)
-                        Text(anime.displayYear(), color = Color(0xCCFFFFFF), fontSize = 11.sp)
-                    }
-                }
-
-                // Bottom Content Info Overlay inside card
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    val genres = anime.displayGenres()
-                    if (genres.isNotEmpty()) {
-                        Text(
-                            text = genres.replaceFirstChar { it.uppercase() },
-                            color = PrimaryGlow,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Text(
-                        text = anime.displayTitle(),
-                        color = Color.White,
-                        fontSize = 21.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                    AsyncImage(
+                        model = anime.banner ?: anime.displayPoster(),
+                        contentDescription = anime.displayTitle(),
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
                     )
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    // Smooth dark cinematic gradient inside the floating card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0x28000000),
+                                        Color(0x4D000000),
+                                        Color(0xD908090F),
+                                        Color(0xF508090F)
+                                    )
+                                )
+                            )
+                    )
 
-                    // Action Buttons Row (Both buttons fit 100% cleanly inside the single full-width card!)
+                    // Top Badges inside the floating card
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .weight(1.25f)
-                                .height(42.dp)
-                                .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
                                 .clip(RoundedCornerShape(50))
                                 .background(Color.White)
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            Color.Transparent,
-                                            Color(0x443B82F6),
-                                            Color.Transparent
-                                        ),
-                                        start = Offset(shineOffset, 0f),
-                                        end = Offset(shineOffset + 120f, 120f)
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
+                                .padding(horizontal = 11.dp, vertical = 4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF0A0B10), modifier = Modifier.size(18.dp))
-                                Text(
-                                    text = tr("Tomosha qilish", "Watch Now", "Смотреть"),
-                                    color = Color(0xFF0A0B10),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
+                            Text(
+                                text = tr("TOP PREMYERA", "TOP PREMIERE", "ТОП ПРЕМЬЕРА"),
+                                color = Color(0xFF0A0B10),
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.5.sp
+                            )
                         }
 
-                        Box(
+                        Row(
                             modifier = Modifier
-                                .weight(0.9f)
-                                .height(42.dp)
-                                .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
                                 .clip(RoundedCornerShape(50))
-                                .background(Color(0xBF1A1D2B))
-                                .border(0.8.dp, Color(0x33FFFFFF), RoundedCornerShape(50)),
-                            contentAlignment = Alignment.Center
+                                .background(Color(0xBF12141E))
+                                .border(0.8.dp, Color(0x28FFFFFF), RoundedCornerShape(50))
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            Icon(Icons.Default.Star, contentDescription = null, tint = RatingGold, modifier = Modifier.size(12.dp))
+                            Text(anime.displayRating(), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("•", color = Color(0x99FFFFFF), fontSize = 11.sp)
+                            Text(anime.displayYear(), color = Color(0xCCFFFFFF), fontSize = 11.sp)
+                        }
+                    }
+
+                    // Bottom Content Info Overlay inside card
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        val genres = anime.displayGenres()
+                        if (genres.isNotEmpty()) {
+                            Text(
+                                text = genres.replaceFirstChar { it.uppercase() },
+                                color = PrimaryGlow,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Text(
+                            text = anime.displayTitle(),
+                            color = Color.White,
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        Spacer(modifier = Modifier.height(4.dp))
+
+                        // Action Buttons Row (100% inside the single card!)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .weight(1.25f)
+                                    .height(42.dp)
+                                    .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color.White)
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(
+                                                Color.Transparent,
+                                                Color(0x443B82F6),
+                                                Color.Transparent
+                                            ),
+                                            start = Offset(shineOffset, 0f),
+                                            end = Offset(shineOffset + 120f, 120f)
+                                        )
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
-                                Text(
-                                    text = tr("Batafsil", "Details", "Подробнее"),
-                                    color = Color.White,
-                                    fontSize = 12.5.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color(0xFF0A0B10), modifier = Modifier.size(18.dp))
+                                    Text(
+                                        text = tr("Tomosha qilish", "Watch Now", "Смотреть"),
+                                        color = Color(0xFF0A0B10),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(0.9f)
+                                    .height(42.dp)
+                                    .bounceClick { onAnimeClick(anime.getEffectiveSlug()) }
+                                    .clip(RoundedCornerShape(50))
+                                    .background(Color(0xBF1A1D2B))
+                                    .border(0.8.dp, Color(0x33FFFFFF), RoundedCornerShape(50)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(Icons.Default.Info, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                    Text(
+                                        text = tr("Batafsil", "Details", "Подробнее"),
+                                        color = Color.White,
+                                        fontSize = 12.5.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -720,7 +743,7 @@ fun HeroCarousel(
             }
         }
 
-        // Animated Pill Indicator Dots below the floating card
+        // Animated Pill Indicator Dots below the floating card (Tap to jump to any slide)
         if (items.size > 1) {
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -728,7 +751,7 @@ fun HeroCarousel(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 items.indices.forEach { idx ->
-                    val isSelected = pagerState.currentPage == idx
+                    val isSelected = currentIndex == idx
                     val width by animateDpAsState(
                         targetValue = if (isSelected) 22.dp else 6.dp,
                         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
@@ -744,6 +767,7 @@ fun HeroCarousel(
                             .width(width)
                             .clip(CircleShape)
                             .background(color)
+                            .clickable { currentIndex = idx }
                     )
                 }
             }
