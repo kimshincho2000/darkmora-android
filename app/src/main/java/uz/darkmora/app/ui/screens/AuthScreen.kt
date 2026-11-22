@@ -117,9 +117,10 @@ fun AuthDialog(
             isWaitingTelegram = true
             try {
                 val initRes = DarkmoraApi.initTelegramAuth()
-                if (initRes.ok && !initRes.token.isNullOrBlank() && !initRes.botUrl.isNullOrBlank()) {
-                    tgPollToken = initRes.token
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(initRes.botUrl))
+                val initData = initRes.data
+                if (initRes.ok && initData != null && initData.token.isNotBlank() && initData.botUrl.isNotBlank()) {
+                    tgPollToken = initData.token
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(initData.botUrl))
                     context.startActivity(intent)
                 } else {
                     isWaitingTelegram = false
