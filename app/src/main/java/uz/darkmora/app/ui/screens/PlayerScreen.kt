@@ -76,6 +76,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
 import uz.darkmora.app.data.UserSessionManager
@@ -88,9 +90,12 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 
@@ -320,6 +325,7 @@ fun PlayerScreen(
     DisposableEffect(exoPlayer) {
         onDispose {
             exoPlayer.release()
+            LocalTvStreamProxy.stop()
         }
     }
 
@@ -336,7 +342,7 @@ fun PlayerScreen(
             val nextTitle = currentTitle
             scope.launch {
                 isCastingToTv = true
-                val ok = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle)
+                val (ok, _) = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle)
                 isCastingToTv = false
                 if (ok) {
                     exoPlayer.pause()
@@ -1221,6 +1227,7 @@ fun PlayerScreen(
                                                 onClick = {
                                                     scope.launch {
                                                         DlnaTvCastHelper.stopCast(activeTv)
+                                                        LocalTvStreamProxy.stop()
                                                         connectedTv = null
                                                         Toast.makeText(
                                                             context,
@@ -1251,7 +1258,7 @@ fun PlayerScreen(
                                                     }
                                                     scope.launch {
                                                         isCastingToTv = true
-                                                        val ok = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle)
+                                                        val (ok, errReason) = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle)
                                                         isCastingToTv = false
                                                         if (ok) {
                                                             connectedTv = tv
@@ -1263,10 +1270,11 @@ fun PlayerScreen(
                                                                 Toast.LENGTH_SHORT
                                                             ).show()
                                                         } else {
+                                                            val suffix = if (!errReason.isNullOrBlank()) " ($errReason)" else ""
                                                             Toast.makeText(
                                                                 context,
-                                                                tr("TV ga ulab bo'lmadi. TV yoqilganligini tekshiring.", "Could not cast to TV. Ensure TV is ready.", "Не удалось отправить видео на ТВ."),
-                                                                Toast.LENGTH_SHORT
+                                                                "${tr("TV ga ulab bo'lmadi", "Could not cast to TV", "Не удалось отправить видео на ТВ")}$suffix",
+                                                                Toast.LENGTH_LONG
                                                             ).show()
                                                         }
                                                     }
@@ -1577,8 +1585,187 @@ data class DlnaTvDevice(
     val name: String,
     val host: String,
     val controlUrl: String,
-    val locationUrl: String
+    val locationUrl: String,
+    val serviceType: String = "urn:schemas-upnp-org:service:AVTransport:1"
 )
+
+object LocalTvStreamProxy {
+    private val generation = AtomicInteger(0)
+    @Volatile
+    private var serverSocket: ServerSocket? = null
+    @Volatile
+    private var currentUpstreamUrl: String = ""
+    @Volatile
+    private var running = false
+
+    private val okHttp = OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .build()
+
+    @Synchronized
+    fun startOrUpdate(upstreamUrl: String, targetTvHost: String): String? {
+        if (upstreamUrl.isBlank()) return null
+        val localIp = getLocalIpForTarget(targetTvHost) ?: return null
+        currentUpstreamUrl = upstreamUrl
+
+        var srv = serverSocket
+        if (srv == null || srv.isClosed) {
+            try {
+                srv = ServerSocket(0)
+                serverSocket = srv
+                running = true
+                val activeSrv = srv
+                Thread {
+                    while (running && !activeSrv.isClosed) {
+                        try {
+                            val client = activeSrv.accept()
+                            Thread {
+                                handleClient(client)
+                            }.apply {
+                                isDaemon = true
+                                start()
+                            }
+                        } catch (_: Exception) {
+                            if (!running) break
+                        }
+                    }
+                }.apply {
+                    isDaemon = true
+                    name = "DarkMoraTvProxy"
+                    start()
+                }
+            } catch (_: Exception) {
+                return null
+            }
+        }
+
+        val ext = if (upstreamUrl.contains(".m3u8", ignoreCase = true)) "m3u8" else "mp4"
+        val gen = generation.incrementAndGet()
+        return "http://$localIp:${srv.localPort}/darkmora_$gen.$ext"
+    }
+
+    @Synchronized
+    fun stop() {
+        running = false
+        try {
+            serverSocket?.close()
+        } catch (_: Exception) {}
+        serverSocket = null
+    }
+
+    private fun getLocalIpForTarget(targetHost: String): String? {
+        return try {
+            DatagramSocket().use { s ->
+                s.connect(InetAddress.getByName(targetHost), 80)
+                s.localAddress?.hostAddress?.takeIf { !it.isNullOrBlank() && it != "0.0.0.0" && it != "::" }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun handleClient(client: Socket) {
+        try {
+            client.use { sock ->
+                sock.soTimeout = 15000
+                val input = sock.getInputStream()
+                val reqLine = readLine(input) ?: return
+                val parts = reqLine.trim().split(Regex("\\s+"))
+                val method = parts.getOrNull(0)?.uppercase(Locale.US) ?: "GET"
+
+                var rangeHeader: String? = null
+                while (true) {
+                    val line = readLine(input) ?: break
+                    if (line.isEmpty()) break
+                    val idx = line.indexOf(':')
+                    if (idx > 0) {
+                        val name = line.substring(0, idx).trim().lowercase(Locale.US)
+                        val value = line.substring(idx + 1).trim()
+                        if (name == "range") rangeHeader = value
+                    }
+                }
+
+                val targetUrl = currentUpstreamUrl
+                if (targetUrl.isBlank()) return
+
+                val reqBuilder = Request.Builder()
+                    .url(targetUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 DarkMora/2.4")
+                    .header("Referer", "https://darkmora.uz/")
+                    .header("Origin", "https://darkmora.uz")
+
+                if (!rangeHeader.isNullOrBlank()) {
+                    reqBuilder.header("Range", rangeHeader)
+                }
+                if (method == "HEAD") {
+                    reqBuilder.head()
+                } else {
+                    reqBuilder.get()
+                }
+
+                okHttp.newCall(reqBuilder.build()).execute().use { upstream ->
+                    val statusText = upstream.message.ifBlank {
+                        if (upstream.code == 206) "Partial Content" else "OK"
+                    }
+                    val contentType = upstream.header("Content-Type")
+                        ?: if (targetUrl.contains(".m3u8", ignoreCase = true)) "application/x-mpegURL" else "video/mp4"
+                    val contentLength = upstream.header("Content-Length")
+                    val contentRange = upstream.header("Content-Range")
+
+                    val headerBytes = buildString {
+                        append("HTTP/1.1 ${upstream.code} $statusText\r\n")
+                        append("Content-Type: $contentType\r\n")
+                        append("Accept-Ranges: bytes\r\n")
+                        if (!contentLength.isNullOrBlank()) {
+                            append("Content-Length: $contentLength\r\n")
+                        }
+                        if (!contentRange.isNullOrBlank()) {
+                            append("Content-Range: $contentRange\r\n")
+                        }
+                        append("transferMode.dlna.org: Streaming\r\n")
+                        append("contentFeatures.dlna.org: DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000\r\n")
+                        append("Connection: close\r\n\r\n")
+                    }.toByteArray(Charsets.UTF_8)
+
+                    val out = sock.getOutputStream()
+                    out.write(headerBytes)
+                    out.flush()
+
+                    if (method != "HEAD") {
+                        val bodyStream = upstream.body?.byteStream()
+                        if (bodyStream != null) {
+                            val buf = ByteArray(32768)
+                            while (running) {
+                                val read = bodyStream.read(buf)
+                                if (read <= 0) break
+                                out.write(buf, 0, read)
+                            }
+                            out.flush()
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Client closed connection or seeked to a new range
+        }
+    }
+
+    private fun readLine(input: InputStream): String? {
+        val baos = ByteArrayOutputStream()
+        var b = input.read()
+        if (b == -1) return null
+        while (b != -1) {
+            if (b == '\n'.code) break
+            if (b != '\r'.code) baos.write(b)
+            if (baos.size() > 8192) break
+            b = input.read()
+        }
+        return baos.toString("UTF-8")
+    }
+}
 
 object DlnaTvCastHelper {
     private const val SSDP_ADDRESS = "239.255.255.250"
@@ -1588,6 +1775,7 @@ object DlnaTvCastHelper {
     private val FRIENDLY_NAME_REGEX = Regex("<friendlyName[^>]*>(.*?)</friendlyName>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val URL_BASE_REGEX = Regex("<URLBase[^>]*>(.*?)</URLBase>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val SERVICE_BLOCK_REGEX = Regex("<service[^>]*>(.*?)</service>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val SERVICE_TYPE_REGEX = Regex("<serviceType[^>]*>(.*?)</serviceType>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val CONTROL_URL_REGEX = Regex("<controlURL[^>]*>(.*?)</controlURL>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
 
     suspend fun discoverDevices(): List<DlnaTvDevice> = withContext(Dispatchers.IO) {
@@ -1659,87 +1847,117 @@ object DlnaTvCastHelper {
         uniqueByControl.values.toList()
     }
 
-    suspend fun castVideo(device: DlnaTvDevice, videoUrl: String, title: String): Boolean = withContext(Dispatchers.IO) {
-        if (videoUrl.isBlank()) return@withContext false
+    suspend fun castVideo(device: DlnaTvDevice, videoUrl: String, title: String): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
+        if (videoUrl.isBlank()) return@withContext Pair(false, "Bo'sh URL")
+
+        // Route HTTPS / proxied streams through local LAN HTTP proxy so all DLNA Smart TVs accept it
+        val castUrl = LocalTvStreamProxy.startOrUpdate(videoUrl, device.host) ?: videoUrl
+        val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+
+        // Best-effort Stop before loading new URI (required by some TV DMR implementations)
+        try {
+            stopCast(device)
+        } catch (_: Exception) {}
 
         val safeTitle = xmlEscape(title.ifBlank { "DarkMora Video" })
-        val safeUrl = xmlEscape(videoUrl)
-        val protocolInfo = if (videoUrl.contains(".m3u8", ignoreCase = true)) {
+        val safeUrl = xmlEscape(castUrl)
+        val protocolInfo = if (castUrl.contains(".m3u8", ignoreCase = true)) {
             "http-get:*:application/x-mpegURL:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
         } else {
-            "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+            "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
         }
         val didl = """<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>$safeTitle</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="$protocolInfo">$safeUrl</res></item></DIDL-Lite>"""
 
-        val setUriBody = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-              <s:Body>
-                <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-                  <InstanceID>0</InstanceID>
-                  <CurrentURI>$safeUrl</CurrentURI>
-                  <CurrentURIMetaData>${xmlEscape(didl)}</CurrentURIMetaData>
-                </u:SetAVTransportURI>
-              </s:Body>
-            </s:Envelope>
-        """.trimIndent()
+        fun buildSetUriEnvelope(metaXml: String): String =
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+                "<s:Body>" +
+                "<u:SetAVTransportURI xmlns:u=\"$svc\">" +
+                "<InstanceID>0</InstanceID>" +
+                "<CurrentURI>$safeUrl</CurrentURI>" +
+                "<CurrentURIMetaData>$metaXml</CurrentURIMetaData>" +
+                "</u:SetAVTransportURI>" +
+                "</s:Body>" +
+                "</s:Envelope>"
 
-        val setRes = httpRawRequest(
+        var setRes = httpRawRequest(
             urlStr = device.controlUrl,
             method = "POST",
             headers = mapOf(
                 "Content-Type" to "text/xml; charset=\"utf-8\"",
-                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI\""
+                "SOAPAction" to "\"$svc#SetAVTransportURI\""
             ),
-            body = setUriBody
-        ) ?: return@withContext false
+            body = buildSetUriEnvelope(xmlEscape(didl)),
+            readTimeoutMs = 12000
+        )
 
-        if (setRes.first !in 200..299) return@withContext false
+        // Fallback: retry SetAVTransportURI with empty CurrentURIMetaData for strict TVs
+        if (setRes == null || setRes.first !in 200..299) {
+            setRes = httpRawRequest(
+                urlStr = device.controlUrl,
+                method = "POST",
+                headers = mapOf(
+                    "Content-Type" to "text/xml; charset=\"utf-8\"",
+                    "SOAPAction" to "\"$svc#SetAVTransportURI\""
+                ),
+                body = buildSetUriEnvelope(""),
+                readTimeoutMs = 12000
+            )
+        }
 
-        val playBody = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-              <s:Body>
-                <u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-                  <InstanceID>0</InstanceID>
-                  <Speed>1</Speed>
-                </u:Play>
-              </s:Body>
-            </s:Envelope>
-        """.trimIndent()
+        if (setRes == null) return@withContext Pair(false, "TV javob bermadi")
+        if (setRes.first !in 200..299) return@withContext Pair(false, "URI HTTP ${setRes.first}")
+
+        delay(250)
+
+        val playBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            "<s:Body>" +
+            "<u:Play xmlns:u=\"$svc\">" +
+            "<InstanceID>0</InstanceID>" +
+            "<Speed>1</Speed>" +
+            "</u:Play>" +
+            "</s:Body>" +
+            "</s:Envelope>"
 
         val playRes = httpRawRequest(
             urlStr = device.controlUrl,
             method = "POST",
             headers = mapOf(
                 "Content-Type" to "text/xml; charset=\"utf-8\"",
-                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#Play\""
+                "SOAPAction" to "\"$svc#Play\""
             ),
-            body = playBody
+            body = playBody,
+            readTimeoutMs = 8000
         )
-        playRes != null && playRes.first in 200..299
+
+        if (playRes == null) return@withContext Pair(false, "Play javobsiz")
+        if (playRes.first in 200..299 || playRes.second.contains("701")) {
+            return@withContext Pair(true, null)
+        }
+        Pair(false, "Play HTTP ${playRes.first}")
     }
 
     suspend fun stopCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
-        val stopBody = """
-            <?xml version="1.0" encoding="utf-8"?>
-            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-              <s:Body>
-                <u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-                  <InstanceID>0</InstanceID>
-                </u:Stop>
-              </s:Body>
-            </s:Envelope>
-        """.trimIndent()
+        val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+        val stopBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            "<s:Body>" +
+            "<u:Stop xmlns:u=\"$svc\">" +
+            "<InstanceID>0</InstanceID>" +
+            "</u:Stop>" +
+            "</s:Body>" +
+            "</s:Envelope>"
 
         val res = httpRawRequest(
             urlStr = device.controlUrl,
             method = "POST",
             headers = mapOf(
                 "Content-Type" to "text/xml; charset=\"utf-8\"",
-                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#Stop\""
+                "SOAPAction" to "\"$svc#Stop\""
             ),
-            body = stopBody
+            body = stopBody,
+            readTimeoutMs = 3000
         )
         res != null && res.first in 200..299
     }
@@ -1748,7 +1966,7 @@ object DlnaTvCastHelper {
         return try {
             val locUri = URI(locationUrl)
             val host = locUri.host ?: return null
-            val res = httpRawRequest(locationUrl, "GET", emptyMap(), null) ?: return null
+            val res = httpRawRequest(locationUrl, "GET", emptyMap(), null, readTimeoutMs = 3000) ?: return null
             if (res.first !in 200..299 || res.second.isBlank()) return null
 
             val xml = res.second
@@ -1760,6 +1978,9 @@ object DlnaTvCastHelper {
             val rawControlUrl = CONTROL_URL_REGEX.find(avServiceBlock)?.groupValues?.getOrNull(1)?.trim()
                 ?: return null
             if (rawControlUrl.isBlank()) return null
+
+            val serviceType = SERVICE_TYPE_REGEX.find(avServiceBlock)?.groupValues?.getOrNull(1)?.trim()
+                ?.takeIf { it.isNotBlank() } ?: "urn:schemas-upnp-org:service:AVTransport:1"
 
             val urlBase = URL_BASE_REGEX.find(xml)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
             val resolvedControlUrl = URI(urlBase ?: locationUrl).resolve(rawControlUrl).toString()
@@ -1773,7 +1994,8 @@ object DlnaTvCastHelper {
                 name = friendlyName,
                 host = host,
                 controlUrl = resolvedControlUrl,
-                locationUrl = locationUrl
+                locationUrl = locationUrl,
+                serviceType = serviceType
             )
         } catch (_: Exception) {
             null
@@ -1786,7 +2008,8 @@ object DlnaTvCastHelper {
         urlStr: String,
         method: String,
         headers: Map<String, String>,
-        body: String?
+        body: String?,
+        readTimeoutMs: Int = 4000
     ): Pair<Int, String>? {
         return try {
             val uri = URI(urlStr)
@@ -1820,8 +2043,8 @@ object DlnaTvCastHelper {
             }.toByteArray(Charsets.UTF_8)
 
             Socket().use { socket ->
-                socket.connect(InetSocketAddress(addr, port), 2000)
-                socket.soTimeout = 3000
+                socket.connect(InetSocketAddress(addr, port), 2500)
+                socket.soTimeout = readTimeoutMs
 
                 val out = socket.getOutputStream()
                 out.write(requestBytes)
