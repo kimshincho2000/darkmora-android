@@ -5,6 +5,8 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.graphics.Paint as AndroidPaint
+import android.graphics.RuntimeShader
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -50,6 +52,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -1572,30 +1576,21 @@ private fun TvCastAmbientScreensaver(
     title: String,
     onWake: () -> Unit
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "tv_silk_screensaver")
-    val phaseA by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2.0 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 8500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "silk_phase_a"
-    )
-    val phaseB by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2.0 * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 12500, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "silk_phase_b"
-    )
+    var elapsedSec by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        val startNanos = withFrameNanos { it }
+        while (true) {
+            withFrameNanos { frameNanos ->
+                elapsedSec = (frameNanos - startNanos) / 1_000_000_000f
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFAFAFC))
+            .background(Color.White)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
@@ -1603,151 +1598,69 @@ private fun TvCastAmbientScreensaver(
                 }
             }
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            val sinA = sin(phaseA)
-            val cosA = cos(phaseA)
-            val sinB = sin(phaseB)
-            val cosB = cos(phaseB)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val shader = remember { RuntimeShader(SILK_AURORA_AGSL) }
+            val paint = remember { AndroidPaint().apply { isAntiAlias = true } }
 
-            // 1. Broad luminous violet-indigo silk aura bloom
-            val violetCenter = Offset(
-                x = w * (0.46f + 0.14f * cosA),
-                y = h * (0.38f + 0.18f * sinB)
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xD8763DFF),
-                        Color(0x9E905BFF),
-                        Color(0x38B188FF),
-                        Color.Transparent
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                shader.setFloatUniform("uResolution", size.width, size.height)
+                shader.setFloatUniform("uTime", elapsedSec)
+                drawIntoCanvas { canvas ->
+                    paint.shader = shader
+                    canvas.nativeCanvas.drawRect(0f, 0f, size.width, size.height, paint)
+                }
+            }
+        } else {
+            // Smooth Canvas fallback for Android 7–12 (API 24–32)
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val t = elapsedSec
+                val sinA = sin(t * 0.75f)
+                val cosA = cos(t * 0.75f)
+                val sinB = sin(t * 0.52f)
+                val cosB = cos(t * 0.52f)
+
+                val violetCenter = Offset(w * (0.46f + 0.14f * cosA), h * (0.38f + 0.18f * sinB))
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xD8763DFF), Color(0x9E905BFF), Color(0x38B188FF), Color.Transparent),
+                        center = violetCenter,
+                        radius = max(w, h) * 0.44f
                     ),
                     center = violetCenter,
                     radius = max(w, h) * 0.44f
-                ),
-                center = violetCenter,
-                radius = max(w, h) * 0.44f
-            )
+                )
 
-            // 2. Broad luminous coral-vermilion orange-red silk bloom
-            val coralCenter = Offset(
-                x = w * (0.52f - 0.15f * sinA),
-                y = h * (0.58f - 0.16f * cosB)
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xEEFF4518),
-                        Color(0xBBFF6432),
-                        Color(0x44FF9668),
-                        Color.Transparent
+                val coralCenter = Offset(w * (0.52f - 0.15f * sinA), h * (0.58f - 0.16f * cosB))
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xEEFF4518), Color(0xBBFF6432), Color(0x44FF9668), Color.Transparent),
+                        center = coralCenter,
+                        radius = max(w, h) * 0.46f
                     ),
                     center = coralCenter,
                     radius = max(w, h) * 0.46f
-                ),
-                center = coralCenter,
-                radius = max(w, h) * 0.46f
-            )
+                )
 
-            // 3. Magenta-crimson blending core where violet & orange ribbons twist together
-            val blendCenter = Offset(
-                x = w * (0.50f + 0.10f * sinB),
-                y = h * (0.48f + 0.12f * cosA)
-            )
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xCCE01E5A),
-                        Color(0x70FF3B30),
-                        Color.Transparent
+                val ridgePath = Path().apply {
+                    moveTo(-w * 0.05f, h * (1.02f + 0.08f * cosA))
+                    cubicTo(
+                        w * (0.30f + 0.09f * sinB), h * (0.70f + 0.14f * sinA),
+                        w * (0.58f + 0.08f * cosA), h * (0.30f - 0.14f * sinB),
+                        w * 1.05f, h * (-0.04f + 0.10f * sinA)
+                    )
+                }
+                drawPath(
+                    path = ridgePath,
+                    brush = Brush.linearGradient(
+                        colors = listOf(Color(0x00FFFFFF), Color(0xF5FFFFFF), Color(0xF5FFFFFF), Color(0x00FFFFFF)),
+                        start = Offset(0f, h),
+                        end = Offset(w, 0f)
                     ),
-                    center = blendCenter,
-                    radius = max(w, h) * 0.30f
-                ),
-                center = blendCenter,
-                radius = max(w, h) * 0.30f
-            )
-
-            // 4. Primary sweeping diagonal silk fold ribbon (bottom-left to top-right)
-            val foldShiftY = h * 0.16f * sinA
-            val foldShiftX = w * 0.12f * cosB
-            val ribbonPath = Path().apply {
-                moveTo(-w * 0.10f, h * (0.98f + 0.10f * cosA))
-                cubicTo(
-                    w * (0.26f + 0.08f * sinB), h * (0.72f + 0.15f * sinA),
-                    w * (0.58f + 0.10f * cosA), h * (0.28f - 0.12f * sinB),
-                    w * 1.08f, h * (0.04f + 0.14f * sinA)
-                )
-                lineTo(w * 1.15f, h * (0.42f + 0.12f * cosB))
-                cubicTo(
-                    w * (0.76f - 0.08f * sinA), h * (0.58f + 0.14f * cosA),
-                    w * (0.44f + 0.06f * cosB), h * (0.86f - 0.10f * sinA),
-                    w * 0.12f, h * 1.15f
-                )
-                close()
-            }
-            drawPath(
-                path = ribbonPath,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0x00FF5722),
-                        Color(0xC8FF4518),
-                        Color(0xB8E0215A),
-                        Color(0xB0733BFF),
-                        Color(0x00733BFF)
-                    ),
-                    start = Offset(w * 0.10f + foldShiftX, h * 0.90f + foldShiftY),
-                    end = Offset(w * 0.90f - foldShiftX, h * 0.10f - foldShiftY)
-                )
-            )
-
-            // 5. Crisp diagonal luminous white silk spine (refraction ridge from reference video)
-            val ridgePath = Path().apply {
-                moveTo(-w * 0.05f, h * (1.02f + 0.08f * cosA))
-                cubicTo(
-                    w * (0.30f + 0.09f * sinB), h * (0.70f + 0.14f * sinA),
-                    w * (0.58f + 0.08f * cosA), h * (0.30f - 0.14f * sinB),
-                    w * 1.05f, h * (-0.04f + 0.10f * sinA)
+                    style = Stroke(width = max(w, h) * 0.024f, cap = StrokeCap.Round)
                 )
             }
-            drawPath(
-                path = ridgePath,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color(0x00FFFFFF),
-                        Color(0xE8FFFFFF),
-                        Color(0xF5FFFFFF),
-                        Color(0x00FFFFFF)
-                    ),
-                    start = Offset(0f, h),
-                    end = Offset(w, 0f)
-                ),
-                style = Stroke(width = max(w, h) * 0.022f, cap = StrokeCap.Round)
-            )
-
-            // 6. Soft white corner veil so edges stay airy and clean like reference video
-            val topLeftVeil = Offset(0f, 0f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color(0xEEFAFAFC), Color(0x88FAFAFC), Color.Transparent),
-                    center = topLeftVeil,
-                    radius = max(w, h) * 0.42f
-                ),
-                center = topLeftVeil,
-                radius = max(w, h) * 0.42f
-            )
-            val bottomRightVeil = Offset(w, h)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color(0xEEFAFAFC), Color(0x88FAFAFC), Color.Transparent),
-                    center = bottomRightVeil,
-                    radius = max(w, h) * 0.44f
-                ),
-                center = bottomRightVeil,
-                radius = max(w, h) * 0.44f
-            )
         }
 
         // Subtle minimal pill showing active TV connection at bottom center
@@ -1779,6 +1692,78 @@ private fun TvCastAmbientScreensaver(
         }
     }
 }
+
+private const val SILK_AURORA_AGSL = """
+uniform float2 uResolution;
+uniform float uTime;
+
+half4 main(float2 fragCoord) {
+    float minDim = max(min(uResolution.x, uResolution.y), 1.0);
+    float2 p = (fragCoord - 0.5 * uResolution) / minDim;
+
+    float t = uTime * 0.85;
+
+    // Slowly breathing diagonal axis (bottom-left to top-right)
+    float angle = -0.68 + 0.18 * sin(t * 0.42);
+    float ca = cos(angle);
+    float sa = sin(angle);
+    float u = p.x * ca - p.y * sa;
+    float v = p.x * sa + p.y * ca;
+
+    // Two smoothly twisting S-curve silk fold spines
+    float curve1 = 0.13 * sin(u * 2.1 - t * 0.92) + 0.055 * cos(u * 1.25 + t * 0.61);
+    float curve2 = -0.11 * sin(u * 1.9 + t * 0.78) + 0.05 * sin(u * 2.7 - t * 0.54);
+    float gap = 0.018 + 0.036 * (0.5 + 0.5 * sin(t * 0.75 + u * 1.2));
+
+    // Sheet 1: Razor-sharp fold edge on one side, silky airbrushed falloff into white on the other
+    float d1 = (v - curve1) - gap * 0.5;
+    float sharp1 = smoothstep(-0.008, 0.007, d1);
+    float width1 = 0.30 + 0.12 * sin(u * 1.6 + t * 0.65);
+    float trail1 = exp(-pow(max(d1, 0.0001) / max(width1, 0.08), 1.28));
+    float env1 = exp(-pow(max(abs(u - 0.12 * sin(t * 0.55)), 0.0001) / 0.95, 2.1));
+    float alpha1 = clamp(sharp1 * trail1 * env1 * 1.15, 0.0, 1.0);
+
+    // Color sweep along Sheet 1: vermilion-coral orange -> crimson-magenta -> electric violet
+    float cMix1 = clamp(0.5 + 0.5 * sin(u * 1.85 - t * 0.72 + 0.4), 0.0, 1.0);
+    float3 coral = float3(1.00, 0.25, 0.06);
+    float3 peach = float3(1.00, 0.48, 0.22);
+    float3 crimson = float3(0.88, 0.10, 0.34);
+    float3 violet = float3(0.47, 0.23, 1.00);
+    float3 col1 = mix(mix(coral, peach, clamp(d1 * 2.4, 0.0, 1.0)), mix(crimson, violet, cMix1), smoothstep(0.25, 0.85, cMix1));
+
+    // Sheet 2: Counter-twisting opposing silk fold on the opposite side of the diagonal spine
+    float d2 = -(v - curve2) - gap * 0.5;
+    float sharp2 = smoothstep(-0.008, 0.007, d2);
+    float width2 = 0.28 + 0.11 * cos(u * 1.5 - t * 0.58);
+    float trail2 = exp(-pow(max(d2, 0.0001) / max(width2, 0.08), 1.32));
+    float env2 = exp(-pow(max(abs(u + 0.14 * cos(t * 0.48)), 0.0001) / 0.92, 2.1));
+    float alpha2 = clamp(sharp2 * trail2 * env2 * 1.12, 0.0, 1.0);
+
+    // Color sweep along Sheet 2: deep electric violet -> soft lavender -> warm coral
+    float cMix2 = clamp(0.5 + 0.5 * cos(u * 1.75 + t * 0.68), 0.0, 1.0);
+    float3 lavender = float3(0.62, 0.44, 1.00);
+    float3 col2 = mix(mix(violet, lavender, clamp(d2 * 2.6, 0.0, 1.0)), coral, smoothstep(0.55, 0.98, cMix2));
+
+    // Secondary floating diagonal wisp (gives the 3D twisting double-ribbon depth in the video)
+    float wispCurve = 0.24 * sin(u * 1.4 + t * 0.62) - 0.16 * cos(t * 0.5);
+    float d3 = (v - wispCurve);
+    float sharp3 = smoothstep(-0.010, 0.010, -d3);
+    float trail3 = exp(-pow(max(-d3, 0.0001) / 0.22, 1.35));
+    float env3 = exp(-pow(max(abs(u - 0.35 * cos(t * 0.52)), 0.0001) / 0.65, 2.2));
+    float alpha3 = clamp(sharp3 * trail3 * env3 * 0.72, 0.0, 0.85);
+    float3 col3 = mix(coral, violet, clamp(0.5 + 0.5 * sin(u * 2.2 + t), 0.0, 1.0));
+
+    // Pure white canvas with luminous optical silk ink blending (produces vivid magenta-red core at overlaps)
+    float3 bg = float3(1.0, 1.0, 1.0);
+    float3 res = mix(bg, col1, alpha1);
+    float3 over2 = mix(col2, res * col2 * 1.12, alpha1 * 0.65);
+    res = mix(res, clamp(over2, 0.0, 1.0), alpha2);
+    float3 over3 = mix(col3, res * col3 * 1.10, max(alpha1, alpha2) * 0.55);
+    res = mix(res, clamp(over3, 0.0, 1.0), alpha3);
+
+    return half4(clamp(res, 0.0, 1.0), 1.0);
+}
+"""
 
 @Composable
 private fun GlassBottomPill(
