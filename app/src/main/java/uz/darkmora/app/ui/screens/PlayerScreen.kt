@@ -78,6 +78,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import uz.darkmora.app.cast.TvCastForegroundService
+import uz.darkmora.app.cast.TvCastState
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
 import uz.darkmora.app.data.UserSessionManager
@@ -207,7 +209,7 @@ fun PlayerScreen(
     var discoveredTvs by remember { mutableStateOf<List<DlnaTvDevice>>(emptyList()) }
     var isScanningTvs by remember { mutableStateOf(false) }
     var isCastingToTv by remember { mutableStateOf(false) }
-    var connectedTv by remember { mutableStateOf<DlnaTvDevice?>(null) }
+    val connectedTv = TvCastState.connectedTv
     var tvScanTick by remember { mutableIntStateOf(0) }
     var seekIndicatorText by remember { mutableStateOf<String?>(null) }
     var isDraggingSeek by remember { mutableStateOf(false) }
@@ -326,7 +328,9 @@ fun PlayerScreen(
     DisposableEffect(exoPlayer) {
         onDispose {
             exoPlayer.release()
-            LocalTvStreamProxy.stop()
+            if (TvCastState.connectedTv == null) {
+                LocalTvStreamProxy.stop()
+            }
         }
     }
 
@@ -338,7 +342,7 @@ fun PlayerScreen(
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, ep.qism)
         }
-        val activeTv = connectedTv
+        val activeTv = TvCastState.connectedTv
         if (activeTv != null && nextUrl.isNotBlank()) {
             val nextTitle = currentTitle
             scope.launch {
@@ -346,6 +350,7 @@ fun PlayerScreen(
                 val (ok, _) = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle, duration)
                 isCastingToTv = false
                 if (ok) {
+                    TvCastForegroundService.start(context, activeTv, nextTitle)
                     exoPlayer.pause()
                     Toast.makeText(
                         context,
@@ -1226,16 +1231,12 @@ fun PlayerScreen(
                                                 text = tr("TV dan uzish", "Disconnect TV", "Отключить ТВ"),
                                                 isSelected = true,
                                                 onClick = {
-                                                    scope.launch {
-                                                        DlnaTvCastHelper.stopCast(activeTv)
-                                                        LocalTvStreamProxy.stop()
-                                                        connectedTv = null
-                                                        Toast.makeText(
-                                                            context,
-                                                            tr("TV dan uzildi", "Disconnected from TV", "Отключено от ТВ"),
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    }
+                                                    TvCastForegroundService.stop(context)
+                                                    Toast.makeText(
+                                                        context,
+                                                        tr("TV dan uzildi", "Disconnected from TV", "Отключено от ТВ"),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
                                                     lastInteractionTick++
                                                 }
                                             )
@@ -1262,7 +1263,7 @@ fun PlayerScreen(
                                                         val (ok, errReason) = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle, duration)
                                                         isCastingToTv = false
                                                         if (ok) {
-                                                            connectedTv = tv
+                                                            TvCastForegroundService.start(context, tv, currentTitle)
                                                             exoPlayer.pause()
                                                             activeBottomSheet = null
                                                             Toast.makeText(
