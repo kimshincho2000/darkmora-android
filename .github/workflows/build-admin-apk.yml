@@ -1,0 +1,39 @@
+name: Build DarkMora Admin APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'admin-app/**'
+      - '.github/workflows/build-admin-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build-admin:
+    name: Build DarkMora Admin Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle 8.4
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Build Admin Release APK
+        working-directory: admin-app
+        run: gradle assembleRelease --stacktrace
+
+      - name: Upload Admin APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DarkMora-Admin-APK
+          path: admin-app/app/build/outputs/apk/release/app-release.apk
