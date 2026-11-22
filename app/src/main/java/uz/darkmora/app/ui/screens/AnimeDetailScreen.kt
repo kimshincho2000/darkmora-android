@@ -50,6 +50,8 @@ fun AnimeDetailScreen(
     var isLoading by remember { mutableStateOf(true) }
     var isFavorite by remember { mutableStateOf(false) }
     var lastWatchedEp by remember { mutableIntStateOf(sessionManager.getLastWatchedEpisode(slug)) }
+    var showAuthDialog by remember { mutableStateOf(false) }
+    var pendingEpisodeToPlay by remember { mutableStateOf<Pair<Anime, Episode>?>(null) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(slug) {
@@ -72,7 +74,7 @@ fun AnimeDetailScreen(
         }
     }
 
-    fun launchEpisode(a: Anime, ep: Episode) {
+    fun openEpisodePlayer(a: Anime, ep: Episode) {
         val rawUrl = ep.videoUrl ?: ep.embedUrl ?: ""
         val rawTitle = "${a.displayTitle()} - ${ep.qism}-qism"
         val b64Url = Base64.encodeToString(rawUrl.toByteArray(Charsets.UTF_8), Base64.URL_SAFE or Base64.NO_WRAP)
@@ -80,6 +82,24 @@ fun AnimeDetailScreen(
         sessionManager.saveLastWatchedEpisode(slug, ep.qism)
         lastWatchedEp = ep.qism
         onPlayEpisode(b64Url, b64Title, slug, ep.qism)
+    }
+
+    fun launchEpisode(a: Anime, ep: Episode) {
+        if (!sessionManager.isLoggedIn()) {
+            pendingEpisodeToPlay = Pair(a, ep)
+            showAuthDialog = true
+            Toast.makeText(
+                context,
+                tr(
+                    "Anime ko'rish uchun avval ro'yxatdan o'ting yoki kiring",
+                    "Please register or sign in to watch anime",
+                    "Войдите или зарегистрируйтесь для просмотра аниме"
+                ),
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+        openEpisodePlayer(a, ep)
     }
 
     Box(
@@ -482,6 +502,22 @@ fun AnimeDetailScreen(
                     }
                 }
             }
+        }
+
+        if (showAuthDialog) {
+            AuthDialog(
+                onDismiss = {
+                    showAuthDialog = false
+                    pendingEpisodeToPlay = null
+                },
+                onLoginSuccess = {
+                    showAuthDialog = false
+                    pendingEpisodeToPlay?.let { (a, ep) ->
+                        pendingEpisodeToPlay = null
+                        openEpisodePlayer(a, ep)
+                    }
+                }
+            )
         }
     }
 }
