@@ -1645,7 +1645,7 @@ object LocalTvStreamProxy {
 
         val ext = if (upstreamUrl.contains(".m3u8", ignoreCase = true)) "m3u8" else "mp4"
         val gen = generation.incrementAndGet()
-        return "http://$localIp:${srv.localPort}/darkmora_$gen.$ext"
+        return "http://$localIp:${srv.localPort}/video-item-$gen.$ext"
     }
 
     @Synchronized
@@ -1895,14 +1895,13 @@ object DlnaTvCastHelper {
             totalSec % 60L
         )
 
-        // Best-effort Stop before loading new URI
-        try {
-            if (stopCast(device)) {
-                delay(150)
-            }
-        } catch (_: Exception) {}
-
-        fun buildDidl(targetUrl: String, fullDlnaFlags: Boolean, upnpClass: String = "object.item.videoItem"): String {
+        // Match FastScreen / Cling VideoItem DIDL-Lite 1:1 (exact namespaces, video-item-1, parentID=1, resolution)
+        fun buildDidl(
+            targetUrl: String,
+            fullDlnaFlags: Boolean,
+            upnpClass: String = "object.item.videoItem",
+            includeExtraProps: Boolean = false
+        ): String {
             val escapedTarget = xmlEscape(targetUrl)
             val mime = if (targetUrl.contains(".m3u8", ignoreCase = true)) "application/x-mpegURL" else "video/mp4"
             val proto = if (fullDlnaFlags) {
@@ -1910,18 +1909,21 @@ object DlnaTvCastHelper {
             } else {
                 "http-get:*:$mime:*"
             }
+            val extraTags = if (includeExtraProps) {
+                "<upnp:artist>DarkMora</upnp:artist><upnp:album>DarkMora</upnp:album><dc:date>2026-01-01</dc:date>"
+            } else {
+                ""
+            }
             return "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" " +
-                "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
                 "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" " +
-                "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">" +
-                "<item id=\"1\" parentID=\"0\" restricted=\"1\">" +
+                "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
+                "xmlns:sec=\"http://www.sec.co.kr/\">" +
+                "<item id=\"video-item-1\" parentID=\"1\" restricted=\"1\">" +
                 "<dc:title>$safeTitle</dc:title>" +
                 "<dc:creator>DarkMora</dc:creator>" +
-                "<dc:date>2026-01-01</dc:date>" +
-                "<dc:description>$safeTitle</dc:description>" +
                 "<upnp:class>$upnpClass</upnp:class>" +
-                "<upnp:albumArtURI>https://darkmora.uz/assets/icon.png</upnp:albumArtURI>" +
-                "<res protocolInfo=\"$proto\" duration=\"$durationStr\" size=\"200000000\">$escapedTarget</res>" +
+                extraTags +
+                "<res protocolInfo=\"$proto\" size=\"200000000\" duration=\"$durationStr\" resolution=\"1920x1080\">$escapedTarget</res>" +
                 "</item></DIDL-Lite>"
         }
 
@@ -1940,7 +1942,7 @@ object DlnaTvCastHelper {
                 urlStr = device.controlUrl,
                 method = "POST",
                 headers = mapOf(
-                    "Content-Type" to "text/xml; charset=\"utf-8\"",
+                    "Content-Type" to "text/xml;charset=\"utf-8\"",
                     "SOAPAction" to "\"$svc#SetAVTransportURI\""
                 ),
                 body = body,
@@ -1948,14 +1950,15 @@ object DlnaTvCastHelper {
             )
         }
 
-        // Progressive fallback cascade with complete non-null DIDL-Lite fields (prevents Cling/Android TV NPEs):
+        // Progressive fallback cascade starting with 1:1 FastScreen/Moka Cling VideoItem format:
         val attempts = mutableListOf<Pair<String, String>>()
         if (!proxyUrl.isNullOrBlank()) {
-            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false, "object.item.videoItem"))))
-            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, true, "object.item.videoItem.movie"))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false, "object.item.videoItem", false))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false, "object.item.videoItem", true))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, true, "object.item.videoItem.movie", false))))
             attempts.add(Pair(proxyUrl, ""))
         }
-        attempts.add(Pair(videoUrl, xmlEscape(buildDidl(videoUrl, false, "object.item.videoItem"))))
+        attempts.add(Pair(videoUrl, xmlEscape(buildDidl(videoUrl, false, "object.item.videoItem", false))))
         attempts.add(Pair(videoUrl, ""))
 
         var setRes: Pair<Int, String>? = null
