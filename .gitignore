@@ -1,0 +1,17 @@
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+.env
+.env.*
+local.properties
+.gradle/
+build/
+app/build/
+admin-app/.gradle/
+admin-app/build/
+admin-app/app/build/
+.idea/
+*.iml
+.DS_Store

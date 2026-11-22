@@ -18,13 +18,17 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(System.getenv("DARKMORA_STORE_FILE") ?: "darkmora-admin.jks")
-            storePassword = System.getenv("DARKMORA_STORE_PASSWORD") ?: "darkmora123"
-            keyAlias = System.getenv("DARKMORA_KEY_ALIAS") ?: "darkmora"
-            keyPassword = System.getenv("DARKMORA_KEY_PASSWORD") ?: "darkmora123"
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = true
+            val ksPath = System.getenv("DARKMORA_STORE_FILE") ?: "darkmora-admin.jks"
+            val ksFile = file(ksPath)
+            if (ksFile.exists() && !System.getenv("DARKMORA_STORE_PASSWORD").isNullOrBlank()) {
+                storeFile = ksFile
+                storePassword = System.getenv("DARKMORA_STORE_PASSWORD")
+                keyAlias = System.getenv("DARKMORA_KEY_ALIAS") ?: "darkmora"
+                keyPassword = System.getenv("DARKMORA_KEY_PASSWORD") ?: System.getenv("DARKMORA_STORE_PASSWORD")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
         }
     }
 
@@ -32,14 +36,18 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
         debug {
-            signingConfig = signingConfigs.getByName("release")
+            if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

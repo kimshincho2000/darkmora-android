@@ -28,8 +28,17 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Decode Admin Keystore
+        if: ${{ secrets.DARKMORA_ADMIN_KEYSTORE_B64 != '' }}
+        run: echo "${{ secrets.DARKMORA_ADMIN_KEYSTORE_B64 }}" | base64 -d > admin-app/app/darkmora-admin.jks
+
       - name: Build Admin Release APK
         working-directory: admin-app
+        env:
+          DARKMORA_STORE_FILE: darkmora-admin.jks
+          DARKMORA_STORE_PASSWORD: ${{ secrets.DARKMORA_STORE_PASSWORD }}
+          DARKMORA_KEY_ALIAS: ${{ secrets.DARKMORA_KEY_ALIAS }}
+          DARKMORA_KEY_PASSWORD: ${{ secrets.DARKMORA_KEY_PASSWORD }}
         run: gradle assembleRelease --stacktrace
 
       - name: Upload Admin APK Artifact

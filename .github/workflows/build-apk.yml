@@ -25,7 +25,16 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Decode Release Keystore
+        if: ${{ secrets.DARKMORA_RELEASE_KEYSTORE_B64 != '' }}
+        run: echo "${{ secrets.DARKMORA_RELEASE_KEYSTORE_B64 }}" | base64 -d > app/darkmora-release.jks
+
       - name: Build Release APK
+        env:
+          DARKMORA_STORE_FILE: darkmora-release.jks
+          DARKMORA_STORE_PASSWORD: ${{ secrets.DARKMORA_STORE_PASSWORD }}
+          DARKMORA_KEY_ALIAS: ${{ secrets.DARKMORA_KEY_ALIAS }}
+          DARKMORA_KEY_PASSWORD: ${{ secrets.DARKMORA_KEY_PASSWORD }}
         run: gradle assembleRelease --stacktrace
 
       - name: Upload APK Artifact
