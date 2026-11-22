@@ -11,16 +11,16 @@ android {
         applicationId = "uz.darkmora.app"
         minSdk = 24
         targetSdk = 34
-        versionCode = 21
-        versionName = "2.5.4"
+        versionCode = 22
+        versionName = "2.5.5"
     }
 
     signingConfigs {
         create("release") {
-            storeFile = file("darkmora-release.jks")
-            storePassword = "darkmora123"
-            keyAlias = "darkmora"
-            keyPassword = "darkmora123"
+            storeFile = file(System.getenv("DARKMORA_STORE_FILE") ?: "darkmora-release.jks")
+            storePassword = System.getenv("DARKMORA_STORE_PASSWORD") ?: "darkmora123"
+            keyAlias = System.getenv("DARKMORA_KEY_ALIAS") ?: "darkmora"
+            keyPassword = System.getenv("DARKMORA_KEY_PASSWORD") ?: "darkmora123"
             enableV1Signing = true
             enableV2Signing = true
         }
@@ -28,7 +28,8 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -52,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.11"

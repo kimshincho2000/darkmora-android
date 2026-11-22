@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uz.darkmora.app.BuildConfig
 import uz.darkmora.app.data.*
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.components.appear
@@ -411,7 +412,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.ListAlt,
                 title = tr("Ilova haqida", "About Us", "О приложении"),
-                trailingText = "v2.5.4",
+                trailingText = "v${BuildConfig.VERSION_NAME}",
                 onClick = { showAboutDialog = true }
             )
             ProfileRowDivider()
@@ -463,7 +464,7 @@ fun ProfileScreen(
             CleanProfileRow(
                 icon = Icons.Outlined.SystemUpdate,
                 title = tr("Yangilanishni tekshirish", "Check for Updates", "Проверить обновления"),
-                trailingText = if (isCheckingUpdate) "..." else "v2.5.4",
+                trailingText = if (isCheckingUpdate) "..." else "v${BuildConfig.VERSION_NAME}",
                 onClick = {
                     if (!isCheckingUpdate) {
                         isCheckingUpdate = true
@@ -471,16 +472,16 @@ fun ProfileScreen(
                             try {
                                 val res = DarkmoraApi.checkUpdate()
                                 if (res.ok && res.data != null) {
-                                    if (res.data.versionCode > 21) {
+                                    if (res.data.versionCode > BuildConfig.VERSION_CODE) {
                                         updateInfo = res.data
                                         showUpdateDialog = true
                                     } else {
                                         Toast.makeText(
                                             context,
                                             tr(
-                                                "Sizda eng so'nggi versiya o'rnatilgan (v2.5.4)",
-                                                "You have the latest version installed (v2.5.4)",
-                                                "У вас установлена последняя версия (v2.5.4)"
+                                                "Sizda eng so'nggi versiya o'rnatilgan (v${BuildConfig.VERSION_NAME})",
+                                                "You have the latest version installed (v${BuildConfig.VERSION_NAME})",
+                                                "У вас установлена последняя версия (v${BuildConfig.VERSION_NAME})"
                                             ),
                                             Toast.LENGTH_SHORT
                                         ).show()

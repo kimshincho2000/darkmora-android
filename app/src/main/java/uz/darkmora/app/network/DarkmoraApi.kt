@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import uz.darkmora.app.data.*
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -24,14 +25,26 @@ object DarkmoraApi {
 
     private val gson = Gson()
 
+    private inline fun <reified T> executeJson(request: Request): T {
+        client.newCall(request).execute().use { response ->
+            val raw = response.body?.string()?.trim().orEmpty()
+            val looksLikeJson = raw.startsWith("{") || raw.startsWith("[")
+            if (!response.isSuccessful && !looksLikeJson) {
+                throw IOException("Server xatosi (HTTP ${response.code})")
+            }
+            if (!looksLikeJson) {
+                throw IOException("Server noto'g'ri javob qaytardi (HTTP ${response.code})")
+            }
+            return gson.fromJson(raw, T::class.java)
+                ?: throw IOException("Bo'sh JSON javob (HTTP ${response.code})")
+        }
+    }
+
     suspend fun getHome(): HomeResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$BASE_URL?action=home")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, HomeResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun getCatalog(page: Int = 1, genre: String = "", q: String = ""): CatalogResponse = withContext(Dispatchers.IO) {
@@ -39,30 +52,21 @@ object DarkmoraApi {
         val request = Request.Builder()
             .url(url)
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, CatalogResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun getAnimeDetail(slug: String): AnimeDetailResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$BASE_URL?action=anime&slug=${enc(slug)}")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, AnimeDetailResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun search(q: String): CatalogResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$BASE_URL?action=search&q=${enc(q)}")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, CatalogResponse::class.java)
-        }
+        executeJson(request)
     }
 
     // --- AUTH METHODS ---
@@ -71,20 +75,14 @@ object DarkmoraApi {
         val request = Request.Builder()
             .url("$BASE_URL?action=tg_auth_init")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, TgAuthInitResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun pollTelegramAuth(token: String): TgAuthPollResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url("$BASE_URL?action=tg_auth_poll&token=${enc(token)}")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, TgAuthPollResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun sendEmailCode(email: String): BaseResponse = withContext(Dispatchers.IO) {
@@ -94,10 +92,7 @@ object DarkmoraApi {
             .url("$BASE_URL?action=send_email_code")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, BaseResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun register(username: String, pass: String, email: String, code: String): AuthResponse = withContext(Dispatchers.IO) {
@@ -113,10 +108,7 @@ object DarkmoraApi {
             .url("$BASE_URL?action=register")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, AuthResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun login(login: String, pass: String): AuthResponse = withContext(Dispatchers.IO) {
@@ -129,10 +121,7 @@ object DarkmoraApi {
             .url("$BASE_URL?action=login")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, AuthResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun getUserProfile(token: String): AuthResponse = withContext(Dispatchers.IO) {
@@ -140,10 +129,7 @@ object DarkmoraApi {
             .url("$BASE_URL?action=user")
             .addHeader("Authorization", "Bearer $token")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, AuthResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun updateProfile(
@@ -163,10 +149,7 @@ object DarkmoraApi {
             .addHeader("Authorization", "Bearer $token")
             .post(body)
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, BaseResponse::class.java)
-        }
+        executeJson(request)
     }
 
     suspend fun submitSupportRequest(
@@ -186,10 +169,7 @@ object DarkmoraApi {
         if (token.isNotBlank()) {
             reqBuilder.addHeader("Authorization", "Bearer $token")
         }
-        client.newCall(reqBuilder.build()).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, BaseResponse::class.java)
-        }
+        executeJson(reqBuilder.build())
     }
 
     // --- AUTO-UPDATE METHOD ---
@@ -198,9 +178,6 @@ object DarkmoraApi {
         val request = Request.Builder()
             .url("$BASE_URL?action=check_update")
             .build()
-        client.newCall(request).execute().use { response ->
-            val json = response.body?.string() ?: "{}"
-            gson.fromJson(json, CheckUpdateResponse::class.java)
-        }
+        executeJson(request)
     }
 }

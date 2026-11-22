@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
         AppThemeState.isDark = sessionManager.isDarkMode()
         AppThemeState.language = sessionManager.getLanguage()
 
-        pendingTargetSlug = intent?.getStringExtra("target_anime_slug")
+        pendingTargetSlug = extractTargetSlug(intent)
         DarkmoraNotificationHelper.schedulePeriodicCheck(this)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -89,10 +89,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        val slug = intent?.getStringExtra("target_anime_slug")
+        val slug = extractTargetSlug(intent)
         if (!slug.isNullOrBlank()) {
             pendingTargetSlug = slug
         }
+    }
+
+    private fun extractTargetSlug(intent: Intent?): String? {
+        val extraSlug = intent?.getStringExtra("target_anime_slug")?.trim()
+        if (!extraSlug.isNullOrBlank()) return extraSlug
+
+        val uri = intent?.data ?: return null
+        val host = uri.host?.lowercase() ?: return null
+        if (host == "darkmora.uz" || host == "www.darkmora.uz") {
+            val segments = uri.pathSegments
+            if (segments.size >= 2 && segments[0].equals("anime", ignoreCase = true)) {
+                return segments[1].trim().takeIf { it.isNotBlank() }
+            }
+        }
+        return null
     }
 }
 
@@ -130,7 +145,7 @@ fun MainApp(
 
         try {
             val res = DarkmoraApi.checkUpdate()
-            if (res.ok && res.data != null && res.data.versionCode > 21) {
+            if (res.ok && res.data != null && res.data.versionCode > BuildConfig.VERSION_CODE) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
             }
