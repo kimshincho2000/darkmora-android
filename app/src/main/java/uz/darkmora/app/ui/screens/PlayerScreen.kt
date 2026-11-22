@@ -1777,6 +1777,8 @@ object DlnaTvCastHelper {
     private val SERVICE_BLOCK_REGEX = Regex("<service[^>]*>(.*?)</service>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val SERVICE_TYPE_REGEX = Regex("<serviceType[^>]*>(.*?)</serviceType>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
     private val CONTROL_URL_REGEX = Regex("<controlURL[^>]*>(.*?)</controlURL>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val UPNP_ERR_CODE_REGEX = Regex("<errorCode[^>]*>(.*?)</errorCode>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val UPNP_ERR_DESC_REGEX = Regex("<errorDescription[^>]*>(.*?)</errorDescription>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
 
     suspend fun discoverDevices(): List<DlnaTvDevice> = withContext(Dispatchers.IO) {
         val locations = LinkedHashSet<String>()
@@ -1850,65 +1852,83 @@ object DlnaTvCastHelper {
     suspend fun castVideo(device: DlnaTvDevice, videoUrl: String, title: String): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
         if (videoUrl.isBlank()) return@withContext Pair(false, "Bo'sh URL")
 
-        // Route HTTPS / proxied streams through local LAN HTTP proxy so all DLNA Smart TVs accept it
-        val castUrl = LocalTvStreamProxy.startOrUpdate(videoUrl, device.host) ?: videoUrl
+        val proxyUrl = LocalTvStreamProxy.startOrUpdate(videoUrl, device.host)
         val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+        val safeTitle = xmlEscape(title.ifBlank { "DarkMora Video" })
 
-        // Best-effort Stop before loading new URI (required by some TV DMR implementations)
+        // Best-effort Stop before loading new URI
         try {
-            stopCast(device)
+            if (stopCast(device)) {
+                delay(150)
+            }
         } catch (_: Exception) {}
 
-        val safeTitle = xmlEscape(title.ifBlank { "DarkMora Video" })
-        val safeUrl = xmlEscape(castUrl)
-        val protocolInfo = if (castUrl.contains(".m3u8", ignoreCase = true)) {
-            "http-get:*:application/x-mpegURL:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
-        } else {
-            "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+        fun buildDidl(targetUrl: String, fullDlnaFlags: Boolean): String {
+            val escapedTarget = xmlEscape(targetUrl)
+            val mime = if (targetUrl.contains(".m3u8", ignoreCase = true)) "application/x-mpegURL" else "video/mp4"
+            val proto = if (fullDlnaFlags) {
+                "http-get:*:$mime:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+            } else {
+                "http-get:*:$mime:*"
+            }
+            return "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">" +
+                "<item id=\"0\" parentID=\"-1\" restricted=\"1\">" +
+                "<dc:title>$safeTitle</dc:title>" +
+                "<upnp:class>object.item.videoItem</upnp:class>" +
+                "<res protocolInfo=\"$proto\">$escapedTarget</res>" +
+                "</item></DIDL-Lite>"
         }
-        val didl = """<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>$safeTitle</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="$protocolInfo">$safeUrl</res></item></DIDL-Lite>"""
 
-        fun buildSetUriEnvelope(metaXml: String): String =
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+        fun trySetUri(targetUrl: String, metaXml: String): Pair<Int, String>? {
+            val body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
                 "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
                 "<s:Body>" +
                 "<u:SetAVTransportURI xmlns:u=\"$svc\">" +
                 "<InstanceID>0</InstanceID>" +
-                "<CurrentURI>$safeUrl</CurrentURI>" +
+                "<CurrentURI>${xmlEscape(targetUrl)}</CurrentURI>" +
                 "<CurrentURIMetaData>$metaXml</CurrentURIMetaData>" +
                 "</u:SetAVTransportURI>" +
                 "</s:Body>" +
                 "</s:Envelope>"
-
-        var setRes = httpRawRequest(
-            urlStr = device.controlUrl,
-            method = "POST",
-            headers = mapOf(
-                "Content-Type" to "text/xml; charset=\"utf-8\"",
-                "SOAPAction" to "\"$svc#SetAVTransportURI\""
-            ),
-            body = buildSetUriEnvelope(xmlEscape(didl)),
-            readTimeoutMs = 12000
-        )
-
-        // Fallback: retry SetAVTransportURI with empty CurrentURIMetaData for strict TVs
-        if (setRes == null || setRes.first !in 200..299) {
-            setRes = httpRawRequest(
+            return httpRawRequest(
                 urlStr = device.controlUrl,
                 method = "POST",
                 headers = mapOf(
                     "Content-Type" to "text/xml; charset=\"utf-8\"",
                     "SOAPAction" to "\"$svc#SetAVTransportURI\""
                 ),
-                body = buildSetUriEnvelope(""),
+                body = body,
                 readTimeoutMs = 12000
             )
         }
 
-        if (setRes == null) return@withContext Pair(false, "TV javob bermadi")
-        if (setRes.first !in 200..299) return@withContext Pair(false, "URI HTTP ${setRes.first}")
+        // Progressive fallback cascade for maximum Smart TV compatibility:
+        // 1) Local HTTP proxy + simple DIDL-Lite
+        // 2) Local HTTP proxy + DLNA flags DIDL-Lite
+        // 3) Local HTTP proxy + empty metadata
+        // 4) Direct stream URL + simple DIDL-Lite (if router AP isolation blocks LAN proxy)
+        // 5) Direct stream URL + empty metadata
+        val attempts = mutableListOf<Pair<String, String>>()
+        if (!proxyUrl.isNullOrBlank()) {
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, true))))
+            attempts.add(Pair(proxyUrl, ""))
+        }
+        attempts.add(Pair(videoUrl, xmlEscape(buildDidl(videoUrl, false))))
+        attempts.add(Pair(videoUrl, ""))
 
-        delay(250)
+        var setRes: Pair<Int, String>? = null
+        for ((candidateUrl, candidateMeta) in attempts) {
+            setRes = trySetUri(candidateUrl, candidateMeta)
+            if (setRes != null && setRes.first in 200..299) break
+        }
+
+        if (setRes == null) return@withContext Pair(false, "TV javob bermadi")
+        if (setRes.first !in 200..299) {
+            return@withContext Pair(false, formatUpnpFault("URI", setRes.first, setRes.second))
+        }
+
+        delay(450)
 
         val playBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
@@ -1920,7 +1940,7 @@ object DlnaTvCastHelper {
             "</s:Body>" +
             "</s:Envelope>"
 
-        val playRes = httpRawRequest(
+        var playRes = httpRawRequest(
             urlStr = device.controlUrl,
             method = "POST",
             headers = mapOf(
@@ -1931,11 +1951,35 @@ object DlnaTvCastHelper {
             readTimeoutMs = 8000
         )
 
+        if (playRes == null || playRes.first !in 200..299) {
+            delay(900)
+            playRes = httpRawRequest(
+                urlStr = device.controlUrl,
+                method = "POST",
+                headers = mapOf(
+                    "Content-Type" to "text/xml; charset=\"utf-8\"",
+                    "SOAPAction" to "\"$svc#Play\""
+                ),
+                body = playBody,
+                readTimeoutMs = 8000
+            )
+        }
+
         if (playRes == null) return@withContext Pair(false, "Play javobsiz")
         if (playRes.first in 200..299 || playRes.second.contains("701")) {
             return@withContext Pair(true, null)
         }
-        Pair(false, "Play HTTP ${playRes.first}")
+        Pair(false, formatUpnpFault("Play", playRes.first, playRes.second))
+    }
+
+    private fun formatUpnpFault(stage: String, httpCode: Int, xmlBody: String): String {
+        val code = UPNP_ERR_CODE_REGEX.find(xmlBody)?.groupValues?.getOrNull(1)?.trim()
+        val desc = UPNP_ERR_DESC_REGEX.find(xmlBody)?.groupValues?.getOrNull(1)?.trim()
+        return when {
+            !code.isNullOrBlank() && !desc.isNullOrBlank() -> "$stage $httpCode ($code: $desc)"
+            !code.isNullOrBlank() -> "$stage $httpCode (UPnP $code)"
+            else -> "$stage HTTP $httpCode"
+        }
     }
 
     suspend fun stopCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
