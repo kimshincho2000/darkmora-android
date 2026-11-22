@@ -51,6 +51,8 @@ fun AdminMainScreen(
     var users by remember { mutableStateOf<List<AdminUserItem>>(emptyList()) }
     var userSearch by remember { mutableStateOf("") }
     var broadcasts by remember { mutableStateOf<List<AdminBroadcastItem>>(emptyList()) }
+    var crashes by remember { mutableStateOf<List<AdminCrashItem>>(emptyList()) }
+    var expandedCrashId by remember { mutableStateOf<Int?>(null) }
 
     // Broadcast form state
     var bcTitle by remember { mutableStateOf("") }
@@ -77,6 +79,12 @@ fun AdminMainScreen(
             val bcRes = AdminApi.getBroadcasts(adminToken, 25)
             if (bcRes.ok && bcRes.data != null) {
                 broadcasts = bcRes.data.broadcasts ?: emptyList()
+            }
+        } catch (_: Exception) {}
+        try {
+            val crRes = AdminApi.getCrashes(adminToken, 15)
+            if (crRes.ok && crRes.data != null) {
+                crashes = crRes.data.crashes ?: emptyList()
             }
         } catch (_: Exception) {}
         isRefreshing = false
@@ -360,6 +368,86 @@ fun AdminMainScreen(
                                     color = TextMuted,
                                     fontSize = 12.sp
                                 )
+                            }
+                        }
+
+                        // Crash Reports Card
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(BgCard)
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(22.dp))
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Ilova xatoliklari (Crash)", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (crashes.isEmpty()) "0 ta • Barqaror" else "${crashes.size} ta",
+                                        color = if (crashes.isEmpty()) AccentEmerald else AccentRose,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                if (crashes.isEmpty()) {
+                                    Text(
+                                        text = "Hozircha foydalanuvchilardan xatolik (crash) qayd etilmagan.",
+                                        color = TextMuted,
+                                        fontSize = 12.5.sp
+                                    )
+                                } else {
+                                    crashes.take(10).forEach { cr ->
+                                        val isExpanded = expandedCrashId == cr.id
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(BgCardElevated)
+                                                .clickable { expandedCrashId = if (isExpanded) null else cr.id }
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = cr.errorTitle.ifBlank { "Noma'lum xato" },
+                                                    color = AccentRose,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    maxLines = if (isExpanded) 4 else 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(cr.createdAt, color = TextMuted, fontSize = 10.5.sp)
+                                            }
+                                            Text(
+                                                text = "v${cr.appVersion} (${cr.versionCode}) • ${cr.deviceModel} • ${cr.androidVersion}",
+                                                color = TextSecondary,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (isExpanded && cr.stackTrace.isNotBlank()) {
+                                                Text(
+                                                    text = cr.stackTrace,
+                                                    color = TextMuted,
+                                                    fontSize = 10.sp,
+                                                    lineHeight = 13.sp,
+                                                    modifier = Modifier.padding(top = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

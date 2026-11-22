@@ -133,4 +133,12 @@ object AdminApi {
             .build()
         executeJson(req)
     }
+
+    suspend fun getCrashes(token: String, limit: Int = 20): AdminCrashesResponse = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$BASE_URL?action=admin_get_crashes&limit=$limit")
+            .addHeader("X-Admin-Token", token)
+            .build()
+        executeJson(req)
+    }
 }

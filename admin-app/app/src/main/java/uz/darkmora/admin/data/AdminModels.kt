@@ -201,3 +201,25 @@ data class AdminBroadcastsResponse(
     val error: String? = null,
     val data: AdminBroadcastsData? = null
 )
+
+data class AdminCrashItem(
+    val id: Int = 0,
+    @SerializedName("app_version") val appVersion: String = "",
+    @SerializedName("version_code") val versionCode: Int = 0,
+    @SerializedName("device_model") val deviceModel: String = "",
+    @SerializedName("android_version") val androidVersion: String = "",
+    @SerializedName("thread_name") val threadName: String = "",
+    @SerializedName("error_title") val errorTitle: String = "",
+    @SerializedName("stack_trace") val stackTrace: String = "",
+    @SerializedName("created_at") val createdAt: String = ""
+)
+
+data class AdminCrashesData(
+    val crashes: List<AdminCrashItem>? = null
+)
+
+data class AdminCrashesResponse(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val data: AdminCrashesData? = null
+)
