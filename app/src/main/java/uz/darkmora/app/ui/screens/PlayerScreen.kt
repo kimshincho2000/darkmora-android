@@ -90,6 +90,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
@@ -342,7 +343,7 @@ fun PlayerScreen(
             val nextTitle = currentTitle
             scope.launch {
                 isCastingToTv = true
-                val (ok, _) = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle)
+                val (ok, _) = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle, duration)
                 isCastingToTv = false
                 if (ok) {
                     exoPlayer.pause()
@@ -1258,7 +1259,7 @@ fun PlayerScreen(
                                                     }
                                                     scope.launch {
                                                         isCastingToTv = true
-                                                        val (ok, errReason) = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle)
+                                                        val (ok, errReason) = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle, duration)
                                                         isCastingToTv = false
                                                         if (ok) {
                                                             connectedTv = tv
@@ -1657,11 +1658,36 @@ object LocalTvStreamProxy {
     }
 
     private fun getLocalIpForTarget(targetHost: String): String? {
-        return try {
+        try {
             DatagramSocket().use { s ->
                 s.connect(InetAddress.getByName(targetHost), 80)
-                s.localAddress?.hostAddress?.takeIf { !it.isNullOrBlank() && it != "0.0.0.0" && it != "::" }
+                val ip = s.localAddress?.hostAddress
+                if (!ip.isNullOrBlank() && ip != "0.0.0.0" && ip != "::" && !ip.startsWith("127.")) {
+                    return ip
+                }
             }
+        } catch (_: Exception) {}
+
+        return try {
+            val targetPrefix = targetHost.substringBeforeLast('.', "")
+            var fallbackSiteLocal: String? = null
+            val ifaces = NetworkInterface.getNetworkInterfaces()
+            while (ifaces.hasMoreElements()) {
+                val iface = ifaces.nextElement()
+                if (!iface.isUp || iface.isLoopback) continue
+                val addrs = iface.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    val ip = addr.hostAddress ?: continue
+                    if (addr.isSiteLocalAddress && !ip.contains(':')) {
+                        if (targetPrefix.isNotEmpty() && ip.startsWith("$targetPrefix.")) {
+                            return ip
+                        }
+                        if (fallbackSiteLocal == null) fallbackSiteLocal = ip
+                    }
+                }
+            }
+            fallbackSiteLocal
         } catch (_: Exception) {
             null
         }
@@ -1849,12 +1875,25 @@ object DlnaTvCastHelper {
         uniqueByControl.values.toList()
     }
 
-    suspend fun castVideo(device: DlnaTvDevice, videoUrl: String, title: String): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
+    suspend fun castVideo(
+        device: DlnaTvDevice,
+        videoUrl: String,
+        title: String,
+        durationMs: Long = 0L
+    ): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
         if (videoUrl.isBlank()) return@withContext Pair(false, "Bo'sh URL")
 
         val proxyUrl = LocalTvStreamProxy.startOrUpdate(videoUrl, device.host)
         val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
         val safeTitle = xmlEscape(title.ifBlank { "DarkMora Video" })
+        val totalSec = if (durationMs > 0L) durationMs / 1000L else 1440L
+        val durationStr = String.format(
+            Locale.US,
+            "%02d:%02d:%02d",
+            totalSec / 3600L,
+            (totalSec % 3600L) / 60L,
+            totalSec % 60L
+        )
 
         // Best-effort Stop before loading new URI
         try {
@@ -1863,7 +1902,7 @@ object DlnaTvCastHelper {
             }
         } catch (_: Exception) {}
 
-        fun buildDidl(targetUrl: String, fullDlnaFlags: Boolean): String {
+        fun buildDidl(targetUrl: String, fullDlnaFlags: Boolean, upnpClass: String = "object.item.videoItem"): String {
             val escapedTarget = xmlEscape(targetUrl)
             val mime = if (targetUrl.contains(".m3u8", ignoreCase = true)) "application/x-mpegURL" else "video/mp4"
             val proto = if (fullDlnaFlags) {
@@ -1871,11 +1910,18 @@ object DlnaTvCastHelper {
             } else {
                 "http-get:*:$mime:*"
             }
-            return "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">" +
-                "<item id=\"0\" parentID=\"-1\" restricted=\"1\">" +
+            return "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" " +
+                "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" " +
+                "xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\" " +
+                "xmlns:dlna=\"urn:schemas-dlna-org:metadata-1-0/\">" +
+                "<item id=\"1\" parentID=\"0\" restricted=\"1\">" +
                 "<dc:title>$safeTitle</dc:title>" +
-                "<upnp:class>object.item.videoItem</upnp:class>" +
-                "<res protocolInfo=\"$proto\">$escapedTarget</res>" +
+                "<dc:creator>DarkMora</dc:creator>" +
+                "<dc:date>2026-01-01</dc:date>" +
+                "<dc:description>$safeTitle</dc:description>" +
+                "<upnp:class>$upnpClass</upnp:class>" +
+                "<upnp:albumArtURI>https://darkmora.uz/assets/icon.png</upnp:albumArtURI>" +
+                "<res protocolInfo=\"$proto\" duration=\"$durationStr\" size=\"200000000\">$escapedTarget</res>" +
                 "</item></DIDL-Lite>"
         }
 
@@ -1902,30 +1948,29 @@ object DlnaTvCastHelper {
             )
         }
 
-        // Progressive fallback cascade for maximum Smart TV compatibility:
-        // 1) Local HTTP proxy + simple DIDL-Lite
-        // 2) Local HTTP proxy + DLNA flags DIDL-Lite
-        // 3) Local HTTP proxy + empty metadata
-        // 4) Direct stream URL + simple DIDL-Lite (if router AP isolation blocks LAN proxy)
-        // 5) Direct stream URL + empty metadata
+        // Progressive fallback cascade with complete non-null DIDL-Lite fields (prevents Cling/Android TV NPEs):
         val attempts = mutableListOf<Pair<String, String>>()
         if (!proxyUrl.isNullOrBlank()) {
-            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false))))
-            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, true))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, false, "object.item.videoItem"))))
+            attempts.add(Pair(proxyUrl, xmlEscape(buildDidl(proxyUrl, true, "object.item.videoItem.movie"))))
             attempts.add(Pair(proxyUrl, ""))
         }
-        attempts.add(Pair(videoUrl, xmlEscape(buildDidl(videoUrl, false))))
+        attempts.add(Pair(videoUrl, xmlEscape(buildDidl(videoUrl, false, "object.item.videoItem"))))
         attempts.add(Pair(videoUrl, ""))
 
         var setRes: Pair<Int, String>? = null
+        var firstNonEmptyMetaError: String? = null
         for ((candidateUrl, candidateMeta) in attempts) {
             setRes = trySetUri(candidateUrl, candidateMeta)
             if (setRes != null && setRes.first in 200..299) break
+            if (firstNonEmptyMetaError == null && candidateMeta.isNotEmpty() && setRes != null) {
+                firstNonEmptyMetaError = formatUpnpFault("URI", setRes.first, setRes.second)
+            }
         }
 
-        if (setRes == null) return@withContext Pair(false, "TV javob bermadi")
+        if (setRes == null) return@withContext Pair(false, firstNonEmptyMetaError ?: "TV javob bermadi")
         if (setRes.first !in 200..299) {
-            return@withContext Pair(false, formatUpnpFault("URI", setRes.first, setRes.second))
+            return@withContext Pair(false, firstNonEmptyMetaError ?: formatUpnpFault("URI", setRes.first, setRes.second))
         }
 
         delay(450)
