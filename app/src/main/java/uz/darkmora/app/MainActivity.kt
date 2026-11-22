@@ -87,7 +87,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val slug = extractTargetSlug(intent)
         if (!slug.isNullOrBlank()) {
