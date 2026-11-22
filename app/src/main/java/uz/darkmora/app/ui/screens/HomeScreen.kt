@@ -37,6 +37,7 @@ import androidx.compose.ui.window.Dialog
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import uz.darkmora.app.data.Anime
+import uz.darkmora.app.data.AppBroadcastItem
 import uz.darkmora.app.data.HomeData
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
@@ -55,6 +56,7 @@ fun HomeScreen(
     val user = remember { sessionManager.getUser() }
 
     var homeData by remember { mutableStateOf<HomeData?>(null) }
+    var broadcasts by remember { mutableStateOf<List<AppBroadcastItem>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedMenuTab by remember { mutableIntStateOf(0) } // 0 = Barchasi, 1 = Yangi Qismlar, 2 = Top Xitlar
     var showNotificationsSheet by remember { mutableStateOf(false) }
@@ -66,7 +68,7 @@ fun HomeScreen(
         isLoading = true
         scope.launch {
             try {
-                val res = DarkmoraApi.getHome()
+                val res = DarkmoraApi.getHome(sessionManager.getToken())
                 if (res.ok) {
                     homeData = res.data
                 }
@@ -75,6 +77,14 @@ fun HomeScreen(
             } finally {
                 isLoading = false
             }
+        }
+        scope.launch {
+            try {
+                val bcRes = DarkmoraApi.getBroadcasts(10)
+                if (bcRes.ok && bcRes.data != null) {
+                    broadcasts = bcRes.data.broadcasts ?: emptyList()
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -86,8 +96,9 @@ fun HomeScreen(
         (homeData?.latest ?: homeData?.latestEpisodes ?: homeData?.trending ?: emptyList()).take(12)
     }
 
-    val unreadCount = remember(latestItems, readNotifIds) {
-        latestItems.count { !readNotifIds.contains(it.id) }
+    val unreadCount = remember(latestItems, broadcasts, readNotifIds) {
+        latestItems.count { !readNotifIds.contains(it.id) } +
+            broadcasts.count { !readNotifIds.contains(-it.id) }
     }
 
     Box(
@@ -465,9 +476,10 @@ fun HomeScreen(
         if (showNotificationsSheet) {
             NotificationsDialog(
                 notifications = latestItems,
+                broadcasts = broadcasts,
                 readIds = readNotifIds,
                 onMarkAllRead = {
-                    val allIds = latestItems.map { it.id }
+                    val allIds = latestItems.map { it.id } + broadcasts.map { -it.id }
                     sessionManager.markNotificationsRead(allIds)
                     readNotifIds = sessionManager.getReadNotificationIds()
                 },
@@ -476,6 +488,15 @@ fun HomeScreen(
                     readNotifIds = sessionManager.getReadNotificationIds()
                     showNotificationsSheet = false
                     onAnimeClick(anime.getEffectiveSlug())
+                },
+                onBroadcastClick = { bc ->
+                    sessionManager.markNotificationsRead(listOf(-bc.id))
+                    readNotifIds = sessionManager.getReadNotificationIds()
+                    val slug = bc.animeSlug?.trim().orEmpty()
+                    if (slug.isNotBlank()) {
+                        showNotificationsSheet = false
+                        onAnimeClick(slug)
+                    }
                 },
                 onDismiss = { showNotificationsSheet = false }
             )
@@ -595,7 +616,9 @@ fun NotificationsDialog(
     readIds: Set<Int>,
     onMarkAllRead: () -> Unit,
     onAnimeClick: (Anime) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    broadcasts: List<AppBroadcastItem> = emptyList(),
+    onBroadcastClick: (AppBroadcastItem) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sessionManager = remember { UserSessionManager(context) }
@@ -725,7 +748,7 @@ fun NotificationsDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                if (notifications.isEmpty()) {
+                if (notifications.isEmpty() && broadcasts.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -743,6 +766,78 @@ fun NotificationsDialog(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.weight(1f, fill = false)
                     ) {
+                        itemsIndexed(broadcasts) { _, bc ->
+                            val isUnread = !readIds.contains(-bc.id)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isUnread) PrimaryBlue.copy(alpha = 0.12f) else BgCard)
+                                    .border(
+                                        width = 0.8.dp,
+                                        color = if (isUnread) PrimaryBlue.copy(alpha = 0.4f) else CardBorder,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                    .clickable { onBroadcastClick(bc) }
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(PrimaryBlue.copy(alpha = 0.16f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Campaign,
+                                        contentDescription = null,
+                                        tint = PrimaryBlue,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        if (isUnread) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(7.dp)
+                                                    .clip(CircleShape)
+                                                    .background(PrimaryBlue)
+                                            )
+                                        }
+                                        Text(
+                                            text = "DarkMora Admin • ${bc.createdAt ?: ""}",
+                                            color = PrimaryBlue,
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Text(
+                                        text = bc.title,
+                                        color = TextPrimary,
+                                        fontSize = 13.5.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = bc.body,
+                                        color = TextMuted,
+                                        fontSize = 11.5.sp,
+                                        lineHeight = 16.sp,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+
                         itemsIndexed(notifications) { _, anime ->
                             val isUnread = !readIds.contains(anime.id)
                             Row(

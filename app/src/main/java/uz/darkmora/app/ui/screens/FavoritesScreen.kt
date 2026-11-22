@@ -42,22 +42,23 @@ fun FavoritesScreen(
     var favoriteList by remember { mutableStateOf(sessionManager.getFavoriteAnimes()) }
 
     LaunchedEffect(Unit) {
-        val stored = sessionManager.getFavoriteAnimes()
-        if (stored.isNotEmpty()) {
-            favoriteList = stored
-        } else {
-            val favIds = sessionManager.getFavorites()
-            if (favIds.isNotEmpty()) {
-                try {
-                    val res = DarkmoraApi.getCatalog(page = 1)
-                    if (res.ok) {
-                        val matched = res.data?.items?.filter { favIds.contains(it.id) } ?: emptyList()
-                        favoriteList = matched
-                    }
-                } catch (_: Exception) {}
-            } else {
-                favoriteList = favorites
-            }
+        val localStored = sessionManager.getFavoriteAnimes()
+        if (localStored.isNotEmpty()) {
+            favoriteList = localStored
+        } else if (favorites.isNotEmpty()) {
+            favoriteList = favorites
+        }
+
+        val tok = sessionManager.getToken()
+        if (!tok.isNullOrBlank()) {
+            try {
+                val cloudRes = DarkmoraApi.getBookmarks(tok)
+                if (cloudRes.ok && !cloudRes.data.isNullOrEmpty()) {
+                    val merged = (localStored + cloudRes.data).distinctBy { it.id }
+                    favoriteList = merged
+                    sessionManager.saveFavoriteAnimesList(merged)
+                }
+            } catch (_: Exception) {}
         }
     }
 

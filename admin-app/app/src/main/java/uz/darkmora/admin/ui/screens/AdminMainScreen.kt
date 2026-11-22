@@ -52,6 +52,7 @@ fun AdminMainScreen(
     var userSearch by remember { mutableStateOf("") }
     var broadcasts by remember { mutableStateOf<List<AdminBroadcastItem>>(emptyList()) }
     var crashes by remember { mutableStateOf<List<AdminCrashItem>>(emptyList()) }
+    var userRequests by remember { mutableStateOf<List<AdminUserRequestItem>>(emptyList()) }
     var expandedCrashId by remember { mutableStateOf<Int?>(null) }
 
     // Broadcast form state
@@ -85,6 +86,12 @@ fun AdminMainScreen(
             val crRes = AdminApi.getCrashes(adminToken, 15)
             if (crRes.ok && crRes.data != null) {
                 crashes = crRes.data.crashes ?: emptyList()
+            }
+        } catch (_: Exception) {}
+        try {
+            val reqRes = AdminApi.getRequests(adminToken, "all")
+            if (reqRes.ok && reqRes.data != null) {
+                userRequests = reqRes.data.requests ?: emptyList()
             }
         } catch (_: Exception) {}
         isRefreshing = false
@@ -371,6 +378,126 @@ fun AdminMainScreen(
                             }
                         }
 
+                        // User Requests & Anime Orders Card
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(22.dp))
+                                    .background(BgCard)
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(22.dp))
+                                    .padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                val pendingCount = userRequests.count { it.status == "pending" }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Murojaat va Buyurtmalar", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = if (pendingCount > 0) "$pendingCount ta yangi" else "${userRequests.size} ta",
+                                        color = if (pendingCount > 0) AccentAmber else AccentEmerald,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                if (userRequests.isEmpty()) {
+                                    Text(
+                                        text = "Hozircha foydalanuvchilardan murojaat yoki anime buyurtmalari yo'q.",
+                                        color = TextMuted,
+                                        fontSize = 12.5.sp
+                                    )
+                                } else {
+                                    userRequests.take(15).forEach { reqItem ->
+                                        val isPending = reqItem.status == "pending"
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(BgCardElevated)
+                                                .padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = reqItem.title.ifBlank { "Murojaat #${reqItem.id}" },
+                                                    color = TextPrimary,
+                                                    fontSize = 13.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                Text(
+                                                    text = if (isPending) "Kutilmoqda" else "Bajarildi",
+                                                    color = if (isPending) AccentAmber else AccentEmerald,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold
+                                                )
+                                            }
+                                            if (!reqItem.details.isNullOrBlank()) {
+                                                Text(
+                                                    text = reqItem.details,
+                                                    color = TextSecondary,
+                                                    fontSize = 12.sp,
+                                                    lineHeight = 17.sp
+                                                )
+                                            }
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val metaInfo = listOfNotNull(
+                                                    reqItem.contact?.takeIf { it.isNotBlank() },
+                                                    reqItem.ip?.takeIf { it.isNotBlank() },
+                                                    reqItem.createdAt?.takeIf { it.isNotBlank() }
+                                                ).joinToString(" • ")
+                                                Text(metaInfo, color = TextMuted, fontSize = 10.5.sp, modifier = Modifier.weight(1f))
+
+                                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                                    if (isPending) {
+                                                        Text(
+                                                            text = "✓ Bajarildi",
+                                                            color = AccentEmerald,
+                                                            fontSize = 11.5.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier.clickable {
+                                                                scope.launch {
+                                                                    try {
+                                                                        AdminApi.updateRequestStatus(adminToken, reqItem.id, "done")
+                                                                        refreshTick++
+                                                                    } catch (_: Exception) {}
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "O'chirish",
+                                                        color = AccentRose,
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        modifier = Modifier.clickable {
+                                                            scope.launch {
+                                                                try {
+                                                                    AdminApi.deleteRequest(adminToken, reqItem.id)
+                                                                    refreshTick++
+                                                                } catch (_: Exception) {}
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Crash Reports Card
                         item {
                             Column(
@@ -548,19 +675,23 @@ fun AdminMainScreen(
                                     )
                                 }
                                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    val actLabel = act.actionLabel?.takeIf { it.isNotBlank() } ?: act.label?.takeIf { it.isNotBlank() }
                                     Text(
-                                        text = act.title?.ifBlank { act.label ?: "Faoliyat" } ?: "Faoliyat",
+                                        text = act.title?.ifBlank { actLabel ?: "Faoliyat" } ?: "Faoliyat",
                                         color = TextPrimary,
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    val who = act.username?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: (act.ip ?: "Mehmon")
+                                    val who = act.username?.takeIf { it.isNotBlank() }?.let {
+                                        if (it.startsWith("@") || it.startsWith("ID:")) it else "@$it"
+                                    } ?: act.user?.takeIf { it.isNotBlank() && it != "Mehmon" } ?: (act.ip ?: "Mehmon")
+                                    val labelPart = actLabel?.let { " • $it" } ?: ""
                                     val det = act.details?.takeIf { it.isNotBlank() }?.let { " • $it" } ?: ""
-                                    Text("$who$det • ${act.device ?: ""}", color = TextSecondary, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text("$who$labelPart$det • ${act.device ?: ""}", color = TextSecondary, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text(act.timeAgo?.ifBlank { act.createdAt?.takeLast(5) ?: "" } ?: "", color = TextMuted, fontSize = 11.sp)
+                                Text(act.timeAgo?.ifBlank { act.time?.ifBlank { act.createdAt?.takeLast(5) ?: "" } ?: "" } ?: "", color = TextMuted, fontSize = 11.sp)
                             }
                         }
                     }

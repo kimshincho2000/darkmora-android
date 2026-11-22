@@ -58,7 +58,7 @@ fun AnimeDetailScreen(
         lastWatchedEp = sessionManager.getLastWatchedEpisode(slug)
         scope.launch {
             try {
-                val res = DarkmoraApi.getAnimeDetail(slug)
+                val res = DarkmoraApi.getAnimeDetail(slug, token = sessionManager.getToken())
                 if (res.ok && res.data != null) {
                     anime = res.data.anime
                     episodes = res.data.episodes ?: emptyList()
@@ -195,6 +195,14 @@ fun AnimeDetailScreen(
                                     .size(42.dp)
                                     .bounceClick {
                                         isFavorite = sessionManager.toggleFavoriteAnime(a)
+                                        val tok = sessionManager.getToken()
+                                        if (!tok.isNullOrBlank()) {
+                                            scope.launch {
+                                                try {
+                                                    DarkmoraApi.toggleBookmark(tok, a.id)
+                                                } catch (_: Exception) {}
+                                            }
+                                        }
                                         val msg = if (isFavorite) {
                                             tr("Sevimlilarga qo'shildi", "Added to Favorites", "Добавлено в избранное")
                                         } else {

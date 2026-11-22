@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import uz.darkmora.app.MainActivity
 import uz.darkmora.app.R
 import uz.darkmora.app.data.Anime
+import uz.darkmora.app.data.AppBroadcastItem
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
 import java.net.URL
@@ -145,18 +146,106 @@ object DarkmoraNotificationHelper {
         } catch (_: SecurityException) {}
     }
 
+    suspend fun showBroadcastSystemNotification(
+        context: Context,
+        bc: AppBroadcastItem
+    ) {
+        val sessionManager = UserSessionManager(context)
+        if (!sessionManager.isNotificationsEnabled()) return
+        if (!hasNotificationPermission(context)) return
+
+        createNotificationChannel(context)
+
+        val slug = bc.animeSlug?.trim().orEmpty()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (slug.isNotBlank()) {
+                putExtra("target_anime_slug", slug)
+            }
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            50000 + bc.id,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val imageBitmap = withContext(Dispatchers.IO) {
+            try {
+                val imgUrl = bc.imageUrl?.trim().orEmpty()
+                if (imgUrl.startsWith("http")) {
+                    val conn = URL(imgUrl).openConnection()
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 5000
+                    conn.getInputStream().use { stream ->
+                        BitmapFactory.decodeStream(stream)
+                    }
+                } else null
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_darkmora)
+            .setContentTitle(bc.title.ifBlank { "DarkMora Xabari" })
+            .setContentText(bc.body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+
+        if (imageBitmap != null) {
+            builder.setLargeIcon(imageBitmap)
+            builder.setStyle(
+                NotificationCompat.BigPictureStyle()
+                    .bigPicture(imageBitmap)
+                    .setSummaryText(bc.body)
+            )
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(bc.body))
+        }
+
+        try {
+            NotificationManagerCompat.from(context).notify(
+                50000 + bc.id,
+                builder.build()
+            )
+        } catch (_: SecurityException) {}
+    }
+
     suspend fun checkAndDispatchNewNotifications(context: Context) {
         val sessionManager = UserSessionManager(context)
         if (!sessionManager.isNotificationsEnabled()) return
         if (!hasNotificationPermission(context)) return
 
+        // 1. Check Admin Broadcasts first
         try {
-            val res = DarkmoraApi.getHome()
+            val bcRes = DarkmoraApi.getBroadcasts(10)
+            if (bcRes.ok && bcRes.data != null) {
+                val bcList = bcRes.data.broadcasts ?: emptyList()
+                val alreadyNotified = sessionManager.getNotifiedSystemKeys()
+                for (bc in bcList) {
+                    val bcKey = "bc_${bc.id}"
+                    if (bc.id > 0 && !alreadyNotified.contains(bcKey)) {
+                        showBroadcastSystemNotification(context, bc)
+                        sessionManager.addNotifiedSystemKey(bcKey)
+                        break
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Check New Anime Episodes
+        try {
+            val res = DarkmoraApi.getHome(sessionManager.getToken())
             if (res.ok && res.data != null) {
                 val latestList = (res.data.latest ?: res.data.latestEpisodes ?: emptyList()).take(5)
                 val alreadyNotified = sessionManager.getNotifiedSystemKeys()
+                val hasEpisodeKeys = alreadyNotified.any { !it.startsWith("bc_") }
 
-                if (alreadyNotified.isEmpty() && latestList.isNotEmpty()) {
+                if (!hasEpisodeKeys && latestList.isNotEmpty()) {
                     // First launch: notify the top newest episode & seed the rest so we don't spam 5 at once
                     val newest = latestList.first()
                     showEpisodeSystemNotification(context, newest)

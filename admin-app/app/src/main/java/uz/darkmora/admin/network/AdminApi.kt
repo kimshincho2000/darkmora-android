@@ -141,4 +141,32 @@ object AdminApi {
             .build()
         executeJson(req)
     }
+
+    suspend fun getRequests(token: String, status: String = "all"): AdminRequestsResponse = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$BASE_URL?action=admin_get_requests&status=${enc(status)}")
+            .addHeader("X-Admin-Token", token)
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun updateRequestStatus(token: String, id: Int, status: String): AdminBaseResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf("id" to id, "status" to status)
+        val req = Request.Builder()
+            .url("$BASE_URL?action=admin_update_request")
+            .addHeader("X-Admin-Token", token)
+            .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun deleteRequest(token: String, id: Int): AdminBaseResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf("id" to id)
+        val req = Request.Builder()
+            .url("$BASE_URL?action=admin_delete_request")
+            .addHeader("X-Admin-Token", token)
+            .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+            .build()
+        executeJson(req)
+    }
 }

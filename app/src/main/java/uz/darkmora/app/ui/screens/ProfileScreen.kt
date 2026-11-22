@@ -84,15 +84,22 @@ fun ProfileScreen(
     var isCheckingUpdate by remember { mutableStateOf(false) }
     var isUploadingAvatar by remember { mutableStateOf(false) }
 
-    // Fetch latest animes for Notifications sheet
+    // Fetch latest animes & admin broadcasts for Notifications sheet
     var notifList by remember { mutableStateOf<List<Anime>>(emptyList()) }
+    var broadcastList by remember { mutableStateOf<List<AppBroadcastItem>>(emptyList()) }
     var readNotifIds by remember { mutableStateOf(sessionManager.getReadNotificationIds()) }
 
     LaunchedEffect(Unit) {
         try {
-            val res = DarkmoraApi.getHome()
+            val res = DarkmoraApi.getHome(sessionManager.getToken())
             if (res.ok && res.data != null) {
                 notifList = (res.data.latest ?: res.data.latestEpisodes ?: res.data.trending ?: emptyList()).take(12)
+            }
+        } catch (_: Exception) {}
+        try {
+            val bcRes = DarkmoraApi.getBroadcasts(10)
+            if (bcRes.ok && bcRes.data != null) {
+                broadcastList = bcRes.data.broadcasts ?: emptyList()
             }
         } catch (_: Exception) {}
     }
@@ -343,7 +350,8 @@ fun ProfileScreen(
             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
         )
 
-        val unreadNotifs = notifList.count { !readNotifIds.contains(it.id) }
+        val unreadNotifs = notifList.count { !readNotifIds.contains(it.id) } +
+            broadcastList.count { !readNotifIds.contains(-it.id) }
 
         Column(
             modifier = Modifier
@@ -739,9 +747,10 @@ fun ProfileScreen(
     if (showNotificationsDialog) {
         NotificationsDialog(
             notifications = notifList,
+            broadcasts = broadcastList,
             readIds = readNotifIds,
             onMarkAllRead = {
-                val allIds = notifList.map { it.id }
+                val allIds = notifList.map { it.id } + broadcastList.map { -it.id }
                 sessionManager.markNotificationsRead(allIds)
                 readNotifIds = sessionManager.getReadNotificationIds()
             },
@@ -750,6 +759,15 @@ fun ProfileScreen(
                 readNotifIds = sessionManager.getReadNotificationIds()
                 showNotificationsDialog = false
                 onAnimeClick(anime.getEffectiveSlug())
+            },
+            onBroadcastClick = { bc ->
+                sessionManager.markNotificationsRead(listOf(-bc.id))
+                readNotifIds = sessionManager.getReadNotificationIds()
+                val slug = bc.animeSlug?.trim().orEmpty()
+                if (slug.isNotBlank()) {
+                    showNotificationsDialog = false
+                    onAnimeClick(slug)
+                }
             },
             onDismiss = { showNotificationsDialog = false }
         )
@@ -886,9 +904,9 @@ fun ProfileScreen(
                     )
                     Text(
                         text = tr(
-                            "DarkMora (v2.5.3) — O'zbek tilidagi eng sara animelar, kinolar va seriallarni yuqori Full HD sifatda reklamalarsiz tomosha qilish uchun yaratilgan rasmiy mobil ilova.",
-                            "DarkMora (v2.5.3) — Official mobile streaming platform for watching top anime, movies, and series in Full HD quality without ads.",
-                            "DarkMora (v2.5.3) — Официальное мобильное приложение для просмотра лучших аниме, фильмов и сериалов в Full HD качестве без рекламы."
+                            "DarkMora (v${BuildConfig.VERSION_NAME}) — O'zbek tilidagi eng sara animelar, kinolar va seriallarni yuqori Full HD sifatda reklamalarsiz tomosha qilish uchun yaratilgan rasmiy mobil ilova.",
+                            "DarkMora (v${BuildConfig.VERSION_NAME}) — Official mobile streaming platform for watching top anime, movies, and series in Full HD quality without ads.",
+                            "DarkMora (v${BuildConfig.VERSION_NAME}) — Официальное мобильное приложение для просмотра лучших аниме, фильмов и сериалов в Full HD качестве без рекламы."
                         ),
                         color = TextMuted,
                         fontSize = 13.5.sp,
@@ -1259,19 +1277,22 @@ fun downloadAndInstallApk(context: Context, apkUrl: String) {
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
 
-        val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        val appCtx = context.applicationContext
+        val dm = appCtx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = dm.enqueue(request)
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context?, intent: Intent?) {
                 val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id == downloadId) {
-                    context.unregisterReceiver(this)
-                    val apkFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DarkMora-update.apk")
+                    try {
+                        appCtx.unregisterReceiver(this)
+                    } catch (_: Exception) {}
+                    val apkFile = File(appCtx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "DarkMora-update.apk")
                     if (apkFile.exists()) {
                         val apkUri = FileProvider.getUriForFile(
-                            context,
-                            "${context.packageName}.fileprovider",
+                            appCtx,
+                            "${appCtx.packageName}.fileprovider",
                             apkFile
                         )
                         val installIntent = Intent(Intent.ACTION_VIEW).apply {
@@ -1279,16 +1300,16 @@ fun downloadAndInstallApk(context: Context, apkUrl: String) {
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        context.startActivity(installIntent)
+                        appCtx.startActivity(installIntent)
                     }
                 }
             }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_EXPORTED)
+            appCtx.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_EXPORTED)
         } else {
-            context.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
+            appCtx.registerReceiver(receiver, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE))
         }
 
         Toast.makeText(context, "Yuklab olish boshlandi...", Toast.LENGTH_SHORT).show()

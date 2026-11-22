@@ -185,7 +185,11 @@ fun PlayerScreen(
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, currentEpNum)
             try {
-                val res = DarkmoraApi.getAnimeDetail(slug)
+                val res = DarkmoraApi.getAnimeDetail(
+                    slug = slug,
+                    ep = currentEpNum,
+                    token = sessionManager.getToken()
+                )
                 if (res.ok && res.data != null) {
                     animeDetail = res.data.anime
                     episodes = res.data.episodes ?: emptyList()
@@ -280,6 +284,14 @@ fun PlayerScreen(
                 override fun onPlayerError(error: PlaybackException) {
                     isBuffering = false
                     errorMessage = "Video oqimini yuklashda xatolik (${error.errorCodeName}). Qayta urinib ko'ring."
+                    scope.launch {
+                        DarkmoraApi.logPlayerError(
+                            slug = slug,
+                            ep = currentEpNum,
+                            code = error.errorCodeName,
+                            msg = error.message ?: "PlaybackException"
+                        )
+                    }
                 }
             })
         }
@@ -364,6 +376,15 @@ fun PlayerScreen(
         currentTitle = "$animeBaseTitle - ${ep.qism}-qism"
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, ep.qism)
+            scope.launch {
+                try {
+                    DarkmoraApi.getAnimeDetail(
+                        slug = slug,
+                        ep = ep.qism,
+                        token = sessionManager.getToken()
+                    )
+                } catch (_: Exception) {}
+            }
         }
         val activeTv = TvCastState.connectedTv
         if (activeTv != null && nextUrl.isNotBlank()) {

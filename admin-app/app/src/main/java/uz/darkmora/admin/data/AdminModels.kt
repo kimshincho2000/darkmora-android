@@ -141,12 +141,15 @@ data class AdminDashboardResponse(
 data class AdminActivityItem(
     val id: Int = 0,
     val ip: String? = "",
+    val user: String? = "",
     val username: String? = "",
     @SerializedName("action_type") val actionType: String? = "",
+    @SerializedName("action_label") val actionLabel: String? = "",
     val label: String? = "",
     val title: String? = "",
     val details: String? = "",
     val device: String? = "",
+    val time: String? = "",
     @SerializedName("time_ago") val timeAgo: String? = "",
     @SerializedName("created_at") val createdAt: String? = ""
 )
@@ -222,4 +225,27 @@ data class AdminCrashesResponse(
     val ok: Boolean = false,
     val error: String? = null,
     val data: AdminCrashesData? = null
+)
+
+data class AdminUserRequestItem(
+    val id: Int = 0,
+    @SerializedName("user_id") val userId: String? = "",
+    val type: String? = "support_request",
+    val title: String = "",
+    val details: String? = "",
+    val contact: String? = "",
+    val ip: String? = "",
+    val status: String? = "pending",
+    @SerializedName("created_at") val createdAt: String? = ""
+)
+
+data class AdminRequestsData(
+    val requests: List<AdminUserRequestItem>? = null,
+    val count: Int = 0
+)
+
+data class AdminRequestsResponse(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val data: AdminRequestsData? = null
 )

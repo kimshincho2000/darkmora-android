@@ -79,7 +79,7 @@ class UserSessionManager(context: Context) {
         return isAdded
     }
 
-    private fun saveFavoriteAnimesList(list: List<Anime>) {
+    fun saveFavoriteAnimesList(list: List<Anime>) {
         val ids = list.map { it.id.toString() }.toSet()
         prefs.edit()
             .putString("favorites_anime_json", gson.toJson(list))

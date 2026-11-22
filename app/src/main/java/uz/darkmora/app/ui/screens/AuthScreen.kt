@@ -91,6 +91,14 @@ fun AuthDialog(
     var isSendingCode by remember { mutableStateOf(false) }
     var isVerifyingCode by remember { mutableStateOf(false) }
 
+    // Forgot Password state
+    var resetEmail by remember { mutableStateOf("") }
+    var resetCode by remember { mutableStateOf("") }
+    var resetNewPass by remember { mutableStateOf("") }
+    var resetPassVisible by remember { mutableStateOf(false) }
+    var resetStep by remember { mutableIntStateOf(1) }
+    var isResetBusy by remember { mutableStateOf(false) }
+
     // Telegram auth polling
     LaunchedEffect(tgPollToken, isWaitingTelegram) {
         val tok = tgPollToken ?: return@LaunchedEffect
@@ -531,6 +539,20 @@ fun AuthDialog(
                                 )
 
                                 Text(
+                                    text = tr("Parolni unutdingizmi? Tiklash", "Forgot password? Reset", "Забыли пароль? Восстановить"),
+                                    color = Color(0xFFB8B8BE),
+                                    fontSize = 12.5.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            resetStep = 1
+                                            activeScreen = "forgot"
+                                        }
+                                        .padding(vertical = 2.dp)
+                                )
+
+                                Text(
                                     text = tr("Akkauntingiz yo'qmi? Ro'yxatdan o'tish", "No account? Register", "Нет аккаунта? Регистрация"),
                                     color = Color(0xFF8E8E93),
                                     fontSize = 13.sp,
@@ -541,6 +563,175 @@ fun AuthDialog(
                                             regStep = 1
                                             activeScreen = "register"
                                         }
+                                        .padding(vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        // ====================================================
+                        // MONOCHROME FORGOT PASSWORD FORM (EMAIL OTP)
+                        // ====================================================
+                        "forgot" -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(26.dp))
+                                    .background(Color(0xFF111113))
+                                    .border(1.dp, Color(0x18FFFFFF), RoundedCornerShape(26.dp))
+                                    .padding(20.dp),
+                                verticalArrangement = Arrangement.spacedBy(13.dp)
+                            ) {
+                                Text(
+                                    text = tr("Parolni tiklash", "Reset Password", "Восстановление пароля"),
+                                    color = Color.White,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                if (resetStep == 1) {
+                                    Text(
+                                        text = tr(
+                                            "Akkauntingiz ulangan email manzilni kiriting. Biz 6 xonali tasdiqlash kodi yuboramiz.",
+                                            "Enter your registered email address to receive a 6-digit reset code.",
+                                            "Введите ваш email, чтобы получить 6-значный код восстановления."
+                                        ),
+                                        color = Color(0xFF8E8E93),
+                                        fontSize = 12.5.sp,
+                                        lineHeight = 18.sp
+                                    )
+
+                                    MonochromeAuthInput(
+                                        value = resetEmail,
+                                        onValueChange = { resetEmail = it },
+                                        placeholder = "Email (example@gmail.com)",
+                                        icon = Icons.Default.Email,
+                                        keyboardType = KeyboardType.Email
+                                    )
+
+                                    MonochromeWhiteButton(
+                                        text = tr("Kod yuborish", "Send Reset Code", "Отправить код"),
+                                        isLoading = isResetBusy,
+                                        onClick = {
+                                            if (resetEmail.isBlank() || !resetEmail.contains("@")) {
+                                                Toast.makeText(
+                                                    context,
+                                                    tr("To'g'ri email manzil kiriting", "Enter a valid email", "Введите корректный email"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                return@MonochromeWhiteButton
+                                            }
+                                            scope.launch {
+                                                isResetBusy = true
+                                                try {
+                                                    val res = DarkmoraApi.sendResetCode(resetEmail.trim())
+                                                    if (res.ok) {
+                                                        resetStep = 2
+                                                        Toast.makeText(
+                                                            context,
+                                                            tr("Tiklash kodi emailga yuborildi!", "Reset code sent to email!", "Код отправлен на почту!"),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    } else {
+                                                        Toast.makeText(
+                                                            context,
+                                                            res.error ?: tr("Xatolik yuz berdi", "Error sending code", "Ошибка"),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                } catch (_: Exception) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        tr("Server bilan aloqa yo'q", "Server unreachable", "Нет связи с сервером"),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                } finally {
+                                                    isResetBusy = false
+                                                }
+                                            }
+                                        }
+                                    )
+                                } else {
+                                    Text(
+                                        text = "${tr("Kod yuborildi:", "Code sent to:", "Код отправлен на:")} $resetEmail",
+                                        color = Color(0xFF8E8E93),
+                                        fontSize = 12.5.sp
+                                    )
+
+                                    MonochromeAuthInput(
+                                        value = resetCode,
+                                        onValueChange = { resetCode = it.take(6) },
+                                        placeholder = tr("6 xonali kod", "6-digit code", "6-значный код"),
+                                        icon = Icons.Default.Pin,
+                                        keyboardType = KeyboardType.Number
+                                    )
+
+                                    MonochromeAuthInput(
+                                        value = resetNewPass,
+                                        onValueChange = { resetNewPass = it },
+                                        placeholder = tr("Yangi parol (kamida 6 belgi)", "New password (min 6 chars)", "Новый пароль (мин. 6 символов)"),
+                                        icon = Icons.Default.Lock,
+                                        isPassword = true,
+                                        passwordVisible = resetPassVisible,
+                                        onTogglePassword = { resetPassVisible = !resetPassVisible }
+                                    )
+
+                                    MonochromeWhiteButton(
+                                        text = tr("Parolni yangilash", "Update Password", "Обновить пароль"),
+                                        isLoading = isResetBusy,
+                                        onClick = {
+                                            if (resetCode.length < 4 || resetNewPass.length < 6) {
+                                                Toast.makeText(
+                                                    context,
+                                                    tr("Kod va yangi parolni (6+) kiriting", "Enter code & new password (6+)", "Введите код и новый пароль (6+)"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                return@MonochromeWhiteButton
+                                            }
+                                            scope.launch {
+                                                isResetBusy = true
+                                                try {
+                                                    val res = DarkmoraApi.resetPassword(
+                                                        resetEmail.trim(),
+                                                        resetCode.trim(),
+                                                        resetNewPass
+                                                    )
+                                                    if (res.ok) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            tr("Parol yangilandi! Endi kirishingiz mumkin.", "Password updated! Please sign in.", "Пароль обновлён! Войдите в аккаунт."),
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
+                                                        loginUsername = resetEmail.trim()
+                                                        activeScreen = "login"
+                                                    } else {
+                                                        Toast.makeText(
+                                                            context,
+                                                            res.error ?: tr("Kod noto'g'ri", "Invalid code", "Неверный код"),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                } catch (_: Exception) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        tr("Server bilan aloqa yo'q", "Server unreachable", "Нет связи с сервером"),
+                                                        Toast.LENGTH_SHORT
+                                                    ).show()
+                                                } finally {
+                                                    isResetBusy = false
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+
+                                Text(
+                                    text = tr("← Kirish oynasiga qaytish", "← Back to Sign In", "← Назад ко входу"),
+                                    color = Color(0xFF8E8E93),
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { activeScreen = "login" }
                                         .padding(vertical = 4.dp)
                                 )
                             }

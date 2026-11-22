@@ -40,31 +40,84 @@ object DarkmoraApi {
         }
     }
 
-    suspend fun getHome(): HomeResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
+    suspend fun getHome(token: String? = null): HomeResponse = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
             .url("$BASE_URL?action=home")
-            .build()
-        executeJson(request)
+        if (!token.isNullOrBlank()) {
+            builder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(builder.build())
     }
 
-    suspend fun getCatalog(page: Int = 1, genre: String = "", q: String = ""): CatalogResponse = withContext(Dispatchers.IO) {
-        val url = "$BASE_URL?action=catalog&page=$page&genre=${enc(genre)}&q=${enc(q)}"
-        val request = Request.Builder()
-            .url(url)
-            .build()
-        executeJson(request)
+    suspend fun getCatalog(
+        page: Int = 1,
+        genre: String = "",
+        q: String = "",
+        perPage: Int = 24,
+        token: String? = null
+    ): CatalogResponse = withContext(Dispatchers.IO) {
+        val url = "$BASE_URL?action=catalog&page=$page&per_page=$perPage&genre=${enc(genre)}&q=${enc(q)}"
+        val builder = Request.Builder().url(url)
+        if (!token.isNullOrBlank()) {
+            builder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(builder.build())
     }
 
-    suspend fun getAnimeDetail(slug: String): AnimeDetailResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("$BASE_URL?action=anime&slug=${enc(slug)}")
-            .build()
-        executeJson(request)
+    suspend fun getAnimeDetail(
+        slug: String,
+        ep: Int? = null,
+        token: String? = null
+    ): AnimeDetailResponse = withContext(Dispatchers.IO) {
+        val epParam = if (ep != null && ep > 0) "&ep=$ep" else ""
+        val builder = Request.Builder()
+            .url("$BASE_URL?action=anime&slug=${enc(slug)}$epParam")
+        if (!token.isNullOrBlank()) {
+            builder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(builder.build())
     }
 
-    suspend fun search(q: String): CatalogResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
+    suspend fun search(q: String, token: String? = null): CatalogResponse = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
             .url("$BASE_URL?action=search&q=${enc(q)}")
+        if (!token.isNullOrBlank()) {
+            builder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(builder.build())
+    }
+
+    suspend fun getBroadcasts(limit: Int = 15): AppBroadcastsResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$BASE_URL?action=app_broadcasts&limit=$limit")
+            .build()
+        executeJson(request)
+    }
+
+    suspend fun logPlayerError(slug: String, ep: Int, code: String, msg: String) = withContext(Dispatchers.IO) {
+        try {
+            val url = "$BASE_URL?action=log_player_error&slug=${enc(slug)}&ep=$ep&code=${enc(code)}&msg=${enc(msg)}"
+            val request = Request.Builder().url(url).build()
+            client.newCall(request).execute().close()
+        } catch (_: Exception) {}
+    }
+
+    // --- BOOKMARKS (CLOUD SYNC) ---
+
+    suspend fun toggleBookmark(token: String, animeId: Int): ToggleBookmarkResponse = withContext(Dispatchers.IO) {
+        val body = gson.toJson(mapOf("anime_id" to animeId)).toRequestBody(JSON_MEDIA)
+        val request = Request.Builder()
+            .url("$BASE_URL?action=toggle_bookmark")
+            .addHeader("Authorization", "Bearer $token")
+            .post(body)
+            .build()
+        executeJson(request)
+    }
+
+    suspend fun getBookmarks(token: String): BookmarksResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$BASE_URL?action=get_bookmarks")
+            .addHeader("Authorization", "Bearer $token")
             .build()
         executeJson(request)
     }
@@ -90,6 +143,30 @@ object DarkmoraApi {
         val body = gson.toJson(payload).toRequestBody(JSON_MEDIA)
         val request = Request.Builder()
             .url("$BASE_URL?action=send_email_code")
+            .post(body)
+            .build()
+        executeJson(request)
+    }
+
+    suspend fun sendResetCode(email: String): BaseResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf("email" to email)
+        val body = gson.toJson(payload).toRequestBody(JSON_MEDIA)
+        val request = Request.Builder()
+            .url("$BASE_URL?action=send_reset_code")
+            .post(body)
+            .build()
+        executeJson(request)
+    }
+
+    suspend fun resetPassword(email: String, code: String, newPass: String): AuthResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf(
+            "email" to email,
+            "code" to code,
+            "password" to newPass
+        )
+        val body = gson.toJson(payload).toRequestBody(JSON_MEDIA)
+        val request = Request.Builder()
+            .url("$BASE_URL?action=reset_password")
             .post(body)
             .build()
         executeJson(request)
