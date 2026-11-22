@@ -8,6 +8,7 @@ import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.util.Base64
 import android.util.Rational
 import android.view.ViewGroup
@@ -68,13 +69,27 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
 import uz.darkmora.app.data.UserSessionManager
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.components.bounceClick
 import uz.darkmora.app.ui.theme.*
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URI
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -117,6 +132,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     val view = LocalView.current
     val activity = context as? Activity
+    val scope = rememberCoroutineScope()
     val sessionManager = remember { UserSessionManager(context) }
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
@@ -178,11 +194,15 @@ fun PlayerScreen(
 
     // Custom UI Overlay States matching the photo
     var showControls by remember { mutableStateOf(true) }
-    var activeBottomSheet by remember { mutableStateOf<String?>(null) } // "info", "insight", "continue", "subtitles", "audio", "speed"
+    var activeBottomSheet by remember { mutableStateOf<String?>(null) } // "info", "insight", "continue", "cast", "audio", "speed"
     var playbackSpeed by remember { mutableFloatStateOf(1.0f) }
     var resizeMode by remember { mutableIntStateOf(AspectRatioFrameLayout.RESIZE_MODE_FIT) }
     var audioBoostEnabled by remember { mutableStateOf(false) }
-    var subtitleState by remember { mutableStateOf("O'zbekcha (Original)") }
+    var discoveredTvs by remember { mutableStateOf<List<DlnaTvDevice>>(emptyList()) }
+    var isScanningTvs by remember { mutableStateOf(false) }
+    var isCastingToTv by remember { mutableStateOf(false) }
+    var connectedTv by remember { mutableStateOf<DlnaTvDevice?>(null) }
+    var tvScanTick by remember { mutableIntStateOf(0) }
     var seekIndicatorText by remember { mutableStateOf<String?>(null) }
     var isDraggingSeek by remember { mutableStateOf(false) }
     var dragSeekFraction by remember { mutableFloatStateOf(0f) }
@@ -284,6 +304,19 @@ fun PlayerScreen(
         }
     }
 
+    LaunchedEffect(activeBottomSheet, tvScanTick) {
+        if (activeBottomSheet == "cast") {
+            isScanningTvs = true
+            try {
+                discoveredTvs = DlnaTvCastHelper.discoverDevices()
+            } catch (_: Exception) {
+                discoveredTvs = emptyList()
+            } finally {
+                isScanningTvs = false
+            }
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         onDispose {
             exoPlayer.release()
@@ -297,6 +330,23 @@ fun PlayerScreen(
         currentTitle = "$animeBaseTitle - ${ep.qism}-qism"
         if (slug.isNotBlank()) {
             sessionManager.saveLastWatchedEpisode(slug, ep.qism)
+        }
+        val activeTv = connectedTv
+        if (activeTv != null && nextUrl.isNotBlank()) {
+            val nextTitle = currentTitle
+            scope.launch {
+                isCastingToTv = true
+                val ok = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle)
+                isCastingToTv = false
+                if (ok) {
+                    exoPlayer.pause()
+                    Toast.makeText(
+                        context,
+                        "${activeTv.name}: ${tr("Keyingi qism TV ga uzatildi", "Next episode sent to TV", "Следующая серия отправлена на ТВ")}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
         }
         activeBottomSheet = null
         lastInteractionTick++
@@ -691,7 +741,7 @@ fun PlayerScreen(
 
                 // ============================================================
                 // BOTTOM SECTION:
-                // 1. Left: Episode Subtitle + Bold Anime Title | Right: [Subtitles | AudioWave | Speed] Capsule
+                // 1. Left: Episode Subtitle + Bold Anime Title | Right: [TV Cast | AudioWave | Speed] Capsule
                 // 2. Full-width Rounded Minimalist Progress Bar (White fill on frosted track)
                 // 3. Bottom Left Pills: [Info]  [InSight]  [Continue Watching]
                 // ============================================================
@@ -730,7 +780,7 @@ fun PlayerScreen(
                             )
                         }
 
-                        // Right: 3-Icon Capsule [Subtitles 💬] [Audio Wave  Equalizer] [Speedometer ⏱️]
+                        // Right: 3-Icon Capsule [TV Cast 📺] [Audio Wave  Equalizer] [Speedometer ⏱️]
                         Row(
                             modifier = Modifier
                                 .height(42.dp)
@@ -741,15 +791,15 @@ fun PlayerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(22.dp)
                         ) {
-                            // Icon 1: Subtitles / Captions
+                            // Icon 1: Cast to TV (DLNA / Miracast / External Player)
                             Icon(
-                                imageVector = Icons.Outlined.Subtitles,
-                                contentDescription = "Subtitrlar",
-                                tint = if (activeBottomSheet == "subtitles") PrimaryGlow else Color.White,
+                                imageVector = if (connectedTv != null) Icons.Default.CastConnected else Icons.Default.Cast,
+                                contentDescription = tr("TV ga ulash", "Cast to TV", "Подключить к ТВ"),
+                                tint = if (activeBottomSheet == "cast" || connectedTv != null) PrimaryGlow else Color.White,
                                 modifier = Modifier
                                     .size(20.dp)
                                     .bounceClick {
-                                        activeBottomSheet = if (activeBottomSheet == "subtitles") null else "subtitles"
+                                        activeBottomSheet = if (activeBottomSheet == "cast") null else "cast"
                                         lastInteractionTick++
                                     }
                             )
@@ -909,7 +959,7 @@ fun PlayerScreen(
             }
         }
 
-        // 4. Interactive Liquid Glass Popover Card for [Info / InSight / Continue Watching / Subtitles / Audio / Speed]
+        // 4. Interactive Liquid Glass Popover Card for [Info / InSight / Continue Watching / TV Cast / Audio / Speed]
         AnimatedVisibility(
             visible = activeBottomSheet != null,
             enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
@@ -1089,18 +1139,258 @@ fun PlayerScreen(
                         }
                     }
 
-                    "subtitles" -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Text(tr("Subtitr va Yozuvlar", "Subtitles & Captions", "Субтитры"), color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                listOf("O'zbekcha (Original)", "O'chirilgan").forEach { opt ->
-                                    val selected = subtitleState == opt
+                    "cast" -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = tr(
+                                            "TV ga ulash • Smart TV va Miracast",
+                                            "Cast to TV • Smart TV & Miracast",
+                                            "Подключить к ТВ • Smart TV и Miracast"
+                                        ),
+                                        color = Color.White,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val statusSubtitle = when {
+                                        connectedTv != null -> "${tr("Ulangan", "Connected", "Подключено")}: ${connectedTv!!.name} (${connectedTv!!.host})"
+                                        isScanningTvs -> tr("Wi-Fi tarmoqdan Smart TV qidirilmoqda...", "Scanning Wi-Fi for Smart TVs...", "Поиск Smart TV в сети Wi-Fi...")
+                                        discoveredTvs.isNotEmpty() -> "${discoveredTvs.size} ${tr("ta Smart TV topildi", "Smart TV(s) found", "Smart TV найдено")}"
+                                        else -> tr("Bitta Wi-Fi dagi Smart TV topilmadi. Pastdagi usullardan foydalaning.", "No Wi-Fi Smart TV found. Use options below.", "Smart TV не найден в Wi-Fi. Используйте кнопки ниже.")
+                                    }
+                                    Text(
+                                        text = statusSubtitle,
+                                        color = if (connectedTv != null) PrimaryGlow else Color(0xAAFFFFFF),
+                                        fontSize = 11.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+
+                                if (isScanningTvs || isCastingToTv) {
+                                    CircularProgressIndicator(
+                                        color = PrimaryGlow,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .bounceClick {
+                                                tvScanTick++
+                                                lastInteractionTick++
+                                            }
+                                            .clip(CircleShape)
+                                            .background(Color(0x28FFFFFF))
+                                            .border(0.8.dp, Color(0x33FFFFFF), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = tr("Qayta qidirish", "Rescan", "Обновить"),
+                                            tint = Color.White,
+                                            modifier = Modifier.size(17.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (discoveredTvs.isNotEmpty() || connectedTv != null) {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    connectedTv?.let { activeTv ->
+                                        item(key = "disconnect_${activeTv.controlUrl}") {
+                                            GlassBottomPill(
+                                                text = tr("TV dan uzish", "Disconnect TV", "Отключить ТВ"),
+                                                isSelected = true,
+                                                onClick = {
+                                                    scope.launch {
+                                                        DlnaTvCastHelper.stopCast(activeTv)
+                                                        connectedTv = null
+                                                        Toast.makeText(
+                                                            context,
+                                                            tr("TV dan uzildi", "Disconnected from TV", "Отключено от ТВ"),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                    }
+                                                    lastInteractionTick++
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    items(discoveredTvs, key = { it.controlUrl }) { tv ->
+                                        val isCurrentTv = connectedTv?.controlUrl == tv.controlUrl
+                                        Row(
+                                            modifier = Modifier
+                                                .height(40.dp)
+                                                .bounceClick {
+                                                    if (isCastingToTv) return@bounceClick
+                                                    if (currentVideoUrl.isBlank()) {
+                                                        Toast.makeText(
+                                                            context,
+                                                            tr("Video manzili topilmadi", "Video URL not available", "URL видео не найден"),
+                                                            Toast.LENGTH_SHORT
+                                                        ).show()
+                                                        return@bounceClick
+                                                    }
+                                                    scope.launch {
+                                                        isCastingToTv = true
+                                                        val ok = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle)
+                                                        isCastingToTv = false
+                                                        if (ok) {
+                                                            connectedTv = tv
+                                                            exoPlayer.pause()
+                                                            activeBottomSheet = null
+                                                            Toast.makeText(
+                                                                context,
+                                                                "${tv.name}: ${tr("TV ga uzatildi!", "Casting to TV!", "Трансляция на ТВ!")}",
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        } else {
+                                                            Toast.makeText(
+                                                                context,
+                                                                tr("TV ga ulab bo'lmadi. TV yoqilganligini tekshiring.", "Could not cast to TV. Ensure TV is ready.", "Не удалось отправить видео на ТВ."),
+                                                                Toast.LENGTH_SHORT
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    lastInteractionTick++
+                                                }
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(if (isCurrentTv) Color.White else Color(0x33FFFFFF))
+                                                .border(
+                                                    width = 1.dp,
+                                                    color = if (isCurrentTv) Color.White else Color(0x28FFFFFF),
+                                                    shape = RoundedCornerShape(14.dp)
+                                                )
+                                                .padding(horizontal = 14.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Tv,
+                                                contentDescription = null,
+                                                tint = if (isCurrentTv) Color.Black else Color.White,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Column {
+                                                Text(
+                                                    text = tv.name,
+                                                    color = if (isCurrentTv) Color.Black else Color.White,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = tv.host,
+                                                    color = if (isCurrentTv) Color(0xAA000000) else Color(0x99FFFFFF),
+                                                    fontSize = 10.sp
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                item {
                                     GlassBottomPill(
-                                        text = opt,
-                                        isSelected = selected,
+                                        text = tr("Ekran ulashish (Smart View)", "Screen Mirroring (Cast)", "Трансляция экрана"),
+                                        isSelected = false,
                                         onClick = {
-                                            subtitleState = opt
-                                            activeBottomSheet = null
+                                            val intents = listOf(
+                                                Intent(Settings.ACTION_CAST_SETTINGS),
+                                                Intent("android.settings.WIFI_DISPLAY_SETTINGS"),
+                                                Intent(Settings.ACTION_WIFI_SETTINGS)
+                                            )
+                                            var launched = false
+                                            for (intent in intents) {
+                                                try {
+                                                    context.startActivity(intent)
+                                                    launched = true
+                                                    break
+                                                } catch (_: Exception) {}
+                                            }
+                                            if (!launched) {
+                                                Toast.makeText(
+                                                    context,
+                                                    tr("Telefon sozlamalaridan Smart View / Cast ni oching", "Open Cast / Smart View from phone settings", "Откройте трансляцию экрана в настройках"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            lastInteractionTick++
+                                        }
+                                    )
+                                }
+
+                                item {
+                                    GlassBottomPill(
+                                        text = tr("Tashqi Cast pleyer", "External Cast App", "Внешний Cast-плеер"),
+                                        isSelected = false,
+                                        onClick = {
+                                            if (currentVideoUrl.isBlank()) {
+                                                Toast.makeText(
+                                                    context,
+                                                    tr("Video manzili topilmadi", "Video URL not available", "URL видео не найден"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                                return@GlassBottomPill
+                                            }
+                                            try {
+                                                val mimeType = if (currentVideoUrl.contains(".m3u8", ignoreCase = true)) {
+                                                    "application/x-mpegURL"
+                                                } else {
+                                                    "video/*"
+                                                }
+                                                val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                                                    setDataAndType(Uri.parse(currentVideoUrl), mimeType)
+                                                    putExtra("title", currentTitle)
+                                                }
+                                                context.startActivity(
+                                                    Intent.createChooser(
+                                                        viewIntent,
+                                                        tr("Cast pleyer tanlang", "Choose Cast App", "Выберите плеер")
+                                                    )
+                                                )
+                                            } catch (_: Exception) {
+                                                Toast.makeText(
+                                                    context,
+                                                    tr("Mos tashqi pleyer topilmadi", "No compatible external player found", "Совместимый внешний плеер не найден"),
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                            lastInteractionTick++
+                                        }
+                                    )
+                                }
+
+                                item {
+                                    GlassBottomPill(
+                                        text = tr("Wi-Fi TV qidirish", "Scan Wi-Fi TV", "Поиск Wi-Fi ТВ"),
+                                        isSelected = isScanningTvs,
+                                        onClick = {
+                                            tvScanTick++
+                                            lastInteractionTick++
                                         }
                                     )
                                 }
@@ -1281,4 +1571,352 @@ private fun formatDurationMs(ms: Long): String {
     } else {
         String.format(Locale.US, "%02d:%02d", minutes, seconds)
     }
+}
+
+data class DlnaTvDevice(
+    val name: String,
+    val host: String,
+    val controlUrl: String,
+    val locationUrl: String
+)
+
+object DlnaTvCastHelper {
+    private const val SSDP_ADDRESS = "239.255.255.250"
+    private const val SSDP_PORT = 1900
+
+    private val LOCATION_REGEX = Regex("(?im)^LOCATION:\\s*(.+?)\\s*$")
+    private val FRIENDLY_NAME_REGEX = Regex("<friendlyName[^>]*>(.*?)</friendlyName>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val URL_BASE_REGEX = Regex("<URLBase[^>]*>(.*?)</URLBase>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val SERVICE_BLOCK_REGEX = Regex("<service[^>]*>(.*?)</service>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+    private val CONTROL_URL_REGEX = Regex("<controlURL[^>]*>(.*?)</controlURL>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+
+    suspend fun discoverDevices(): List<DlnaTvDevice> = withContext(Dispatchers.IO) {
+        val locations = LinkedHashSet<String>()
+        val searchTargets = listOf(
+            "urn:schemas-upnp-org:service:AVTransport:1",
+            "urn:schemas-upnp-org:device:MediaRenderer:1"
+        )
+
+        var socket: DatagramSocket? = null
+        try {
+            socket = DatagramSocket().apply {
+                broadcast = true
+                soTimeout = 350
+            }
+            val group = InetAddress.getByName(SSDP_ADDRESS)
+
+            for (st in searchTargets) {
+                val query = buildString {
+                    append("M-SEARCH * HTTP/1.1\r\n")
+                    append("HOST: $SSDP_ADDRESS:$SSDP_PORT\r\n")
+                    append("MAN: \"ssdp:discover\"\r\n")
+                    append("MX: 2\r\n")
+                    append("ST: $st\r\n")
+                    append("\r\n")
+                }.toByteArray(Charsets.UTF_8)
+                val packet = DatagramPacket(query, query.size, group, SSDP_PORT)
+                try {
+                    socket.send(packet)
+                } catch (_: Exception) {}
+            }
+
+            val deadline = System.currentTimeMillis() + 1800L
+            val buf = ByteArray(4096)
+            while (System.currentTimeMillis() < deadline) {
+                try {
+                    val respPacket = DatagramPacket(buf, buf.size)
+                    socket.receive(respPacket)
+                    val msg = String(respPacket.data, 0, respPacket.length, Charsets.UTF_8)
+                    val match = LOCATION_REGEX.find(msg)
+                    val loc = match?.groupValues?.getOrNull(1)?.trim()
+                    if (!loc.isNullOrBlank() && loc.startsWith("http://", ignoreCase = true)) {
+                        locations.add(loc)
+                    }
+                } catch (_: Exception) {
+                    // Timeout slice elapsed; keep listening until deadline
+                }
+            }
+        } catch (_: Exception) {
+            return@withContext emptyList()
+        } finally {
+            try {
+                socket?.close()
+            } catch (_: Exception) {}
+        }
+
+        if (locations.isEmpty()) return@withContext emptyList()
+
+        val parsed = coroutineScope {
+            locations.take(16).map { locationUrl ->
+                async { parseDeviceFromLocation(locationUrl) }
+            }.awaitAll().filterNotNull()
+        }
+
+        val uniqueByControl = LinkedHashMap<String, DlnaTvDevice>()
+        for (dev in parsed) {
+            uniqueByControl.putIfAbsent(dev.controlUrl, dev)
+        }
+        uniqueByControl.values.toList()
+    }
+
+    suspend fun castVideo(device: DlnaTvDevice, videoUrl: String, title: String): Boolean = withContext(Dispatchers.IO) {
+        if (videoUrl.isBlank()) return@withContext false
+
+        val safeTitle = xmlEscape(title.ifBlank { "DarkMora Video" })
+        val safeUrl = xmlEscape(videoUrl)
+        val protocolInfo = if (videoUrl.contains(".m3u8", ignoreCase = true)) {
+            "http-get:*:application/x-mpegURL:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+        } else {
+            "http-get:*:video/mp4:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"
+        }
+        val didl = """<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>$safeTitle</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="$protocolInfo">$safeUrl</res></item></DIDL-Lite>"""
+
+        val setUriBody = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+              <s:Body>
+                <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                  <InstanceID>0</InstanceID>
+                  <CurrentURI>$safeUrl</CurrentURI>
+                  <CurrentURIMetaData>${xmlEscape(didl)}</CurrentURIMetaData>
+                </u:SetAVTransportURI>
+              </s:Body>
+            </s:Envelope>
+        """.trimIndent()
+
+        val setRes = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml; charset=\"utf-8\"",
+                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI\""
+            ),
+            body = setUriBody
+        ) ?: return@withContext false
+
+        if (setRes.first !in 200..299) return@withContext false
+
+        val playBody = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+              <s:Body>
+                <u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                  <InstanceID>0</InstanceID>
+                  <Speed>1</Speed>
+                </u:Play>
+              </s:Body>
+            </s:Envelope>
+        """.trimIndent()
+
+        val playRes = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml; charset=\"utf-8\"",
+                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#Play\""
+            ),
+            body = playBody
+        )
+        playRes != null && playRes.first in 200..299
+    }
+
+    suspend fun stopCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
+        val stopBody = """
+            <?xml version="1.0" encoding="utf-8"?>
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+              <s:Body>
+                <u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                  <InstanceID>0</InstanceID>
+                </u:Stop>
+              </s:Body>
+            </s:Envelope>
+        """.trimIndent()
+
+        val res = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml; charset=\"utf-8\"",
+                "SOAPAction" to "\"urn:schemas-upnp-org:service:AVTransport:1#Stop\""
+            ),
+            body = stopBody
+        )
+        res != null && res.first in 200..299
+    }
+
+    private fun parseDeviceFromLocation(locationUrl: String): DlnaTvDevice? {
+        return try {
+            val locUri = URI(locationUrl)
+            val host = locUri.host ?: return null
+            val res = httpRawRequest(locationUrl, "GET", emptyMap(), null) ?: return null
+            if (res.first !in 200..299 || res.second.isBlank()) return null
+
+            val xml = res.second
+            val avServiceBlock = SERVICE_BLOCK_REGEX.findAll(xml)
+                .map { it.groupValues[1] }
+                .firstOrNull { it.contains("AVTransport", ignoreCase = true) }
+                ?: return null
+
+            val rawControlUrl = CONTROL_URL_REGEX.find(avServiceBlock)?.groupValues?.getOrNull(1)?.trim()
+                ?: return null
+            if (rawControlUrl.isBlank()) return null
+
+            val urlBase = URL_BASE_REGEX.find(xml)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+            val resolvedControlUrl = URI(urlBase ?: locationUrl).resolve(rawControlUrl).toString()
+            val ctrlHost = URI(resolvedControlUrl).host ?: return null
+            if (!InetAddress.getByName(ctrlHost).isSiteLocalAddress) return null
+
+            val rawName = FRIENDLY_NAME_REGEX.find(xml)?.groupValues?.getOrNull(1)?.trim()
+            val friendlyName = rawName?.let { xmlUnescape(it) }?.ifBlank { null } ?: "Smart TV ($host)"
+
+            DlnaTvDevice(
+                name = friendlyName,
+                host = host,
+                controlUrl = resolvedControlUrl,
+                locationUrl = locationUrl
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    // Performs HTTP/1.1 strictly over raw TCP sockets restricted to private site-local LAN IPs,
+    // allowing local DLNA Smart TV control while keeping usesCleartextTraffic="false" globally.
+    private fun httpRawRequest(
+        urlStr: String,
+        method: String,
+        headers: Map<String, String>,
+        body: String?
+    ): Pair<Int, String>? {
+        return try {
+            val uri = URI(urlStr)
+            if (!uri.scheme.equals("http", ignoreCase = true)) return null
+            val host = uri.host ?: return null
+            val addr = InetAddress.getByName(host)
+            if (!addr.isSiteLocalAddress) return null
+
+            val port = if (uri.port > 0) uri.port else 80
+            val path = buildString {
+                append(uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/")
+                if (!uri.rawQuery.isNullOrEmpty()) {
+                    append("?")
+                    append(uri.rawQuery)
+                }
+            }
+
+            val bodyBytes = body?.toByteArray(Charsets.UTF_8)
+            val requestBytes = buildString {
+                append("$method $path HTTP/1.1\r\n")
+                append("Host: $host${if (port != 80) ":$port" else ""}\r\n")
+                append("User-Agent: DarkMora-Android/1.0 UPnP/1.1\r\n")
+                append("Connection: close\r\n")
+                for ((k, v) in headers) {
+                    append("$k: $v\r\n")
+                }
+                if (bodyBytes != null) {
+                    append("Content-Length: ${bodyBytes.size}\r\n")
+                }
+                append("\r\n")
+            }.toByteArray(Charsets.UTF_8)
+
+            Socket().use { socket ->
+                socket.connect(InetSocketAddress(addr, port), 2000)
+                socket.soTimeout = 3000
+
+                val out = socket.getOutputStream()
+                out.write(requestBytes)
+                if (bodyBytes != null) {
+                    out.write(bodyBytes)
+                }
+                out.flush()
+
+                val input = socket.getInputStream()
+                val statusLine = readLineFromStream(input) ?: return null
+                val statusCode = statusLine.trim().split(Regex("\\s+")).getOrNull(1)?.toIntOrNull() ?: return null
+
+                var contentLength = -1
+                var isChunked = false
+                while (true) {
+                    val headerLine = readLineFromStream(input) ?: break
+                    if (headerLine.isEmpty()) break
+                    val colonIdx = headerLine.indexOf(':')
+                    if (colonIdx > 0) {
+                        val name = headerLine.substring(0, colonIdx).trim().lowercase(Locale.US)
+                        val value = headerLine.substring(colonIdx + 1).trim()
+                        if (name == "content-length") {
+                            contentLength = value.toIntOrNull() ?: -1
+                        } else if (name == "transfer-encoding" && value.contains("chunked", ignoreCase = true)) {
+                            isChunked = true
+                        }
+                    }
+                }
+
+                val bodyData = ByteArrayOutputStream()
+                val maxRead = 262144
+                if (isChunked) {
+                    while (bodyData.size() < maxRead) {
+                        val sizeLine = readLineFromStream(input) ?: break
+                        val chunkLen = sizeLine.substringBefore(';').trim().toIntOrNull(16) ?: break
+                        if (chunkLen <= 0) break
+                        var remaining = min(chunkLen, maxRead - bodyData.size())
+                        val buf = ByteArray(min(4096, remaining))
+                        while (remaining > 0) {
+                            val read = input.read(buf, 0, min(buf.size, remaining))
+                            if (read <= 0) break
+                            bodyData.write(buf, 0, read)
+                            remaining -= read
+                        }
+                        readLineFromStream(input) // Trailing CRLF after chunk
+                    }
+                } else if (contentLength >= 0) {
+                    var remaining = min(contentLength, maxRead)
+                    val buf = ByteArray(4096)
+                    while (remaining > 0) {
+                        val read = input.read(buf, 0, min(buf.size, remaining))
+                        if (read <= 0) break
+                        bodyData.write(buf, 0, read)
+                        remaining -= read
+                    }
+                } else {
+                    val buf = ByteArray(4096)
+                    while (bodyData.size() < maxRead) {
+                        val read = input.read(buf, 0, min(buf.size, maxRead - bodyData.size()))
+                        if (read <= 0) break
+                        bodyData.write(buf, 0, read)
+                    }
+                }
+
+                Pair(statusCode, bodyData.toString("UTF-8"))
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun readLineFromStream(input: InputStream): String? {
+        val baos = ByteArrayOutputStream()
+        var b = input.read()
+        if (b == -1) return null
+        while (b != -1) {
+            if (b == '\n'.code) break
+            if (b != '\r'.code) baos.write(b)
+            if (baos.size() > 8192) break
+            b = input.read()
+        }
+        return baos.toString("UTF-8")
+    }
+
+    private fun xmlEscape(text: String): String = text
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+
+    private fun xmlUnescape(text: String): String = text
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
 }
