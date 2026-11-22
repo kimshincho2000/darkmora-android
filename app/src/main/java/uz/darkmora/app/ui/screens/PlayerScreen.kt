@@ -22,6 +22,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -45,6 +47,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -99,8 +104,11 @@ import java.net.URI
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.PI
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 // ============================================================================
 // APPLE TV+ / iOS 26 LIQUID GLASS 1:1 PLAYER (EXACT MATCH TO REFERENCE PHOTO)
@@ -211,6 +219,7 @@ fun PlayerScreen(
     var isCastingToTv by remember { mutableStateOf(false) }
     val connectedTv = TvCastState.connectedTv
     var tvScanTick by remember { mutableIntStateOf(0) }
+    var showTvScreensaver by remember { mutableStateOf(false) }
     var seekIndicatorText by remember { mutableStateOf<String?>(null) }
     var isDraggingSeek by remember { mutableStateOf(false) }
     var dragSeekFraction by remember { mutableFloatStateOf(0f) }
@@ -325,6 +334,16 @@ fun PlayerScreen(
         }
     }
 
+    // 10-second idle ambient silk screensaver when connected to TV
+    LaunchedEffect(connectedTv, lastInteractionTick, activeBottomSheet, isDraggingSeek) {
+        if (connectedTv != null && activeBottomSheet == null && !isDraggingSeek) {
+            delay(10_000L)
+            showTvScreensaver = true
+        } else {
+            showTvScreensaver = false
+        }
+    }
+
     DisposableEffect(exoPlayer) {
         onDispose {
             exoPlayer.release()
@@ -350,7 +369,13 @@ fun PlayerScreen(
                 val (ok, _) = DlnaTvCastHelper.castVideo(activeTv, nextUrl, nextTitle, duration)
                 isCastingToTv = false
                 if (ok) {
-                    TvCastForegroundService.start(context, activeTv, nextTitle)
+                    TvCastForegroundService.start(
+                        context = context,
+                        tv = activeTv,
+                        videoTitle = nextTitle,
+                        posterUrl = animeDetail?.displayPoster().orEmpty(),
+                        durationMs = duration
+                    )
                     exoPlayer.pause()
                     Toast.makeText(
                         context,
@@ -1263,7 +1288,13 @@ fun PlayerScreen(
                                                         val (ok, errReason) = DlnaTvCastHelper.castVideo(tv, currentVideoUrl, currentTitle, duration)
                                                         isCastingToTv = false
                                                         if (ok) {
-                                                            TvCastForegroundService.start(context, tv, currentTitle)
+                                                            TvCastForegroundService.start(
+                                                                context = context,
+                                                                tv = tv,
+                                                                videoTitle = currentTitle,
+                                                                posterUrl = animeDetail?.displayPoster().orEmpty(),
+                                                                durationMs = duration
+                                                            )
                                                             exoPlayer.pause()
                                                             activeBottomSheet = null
                                                             Toast.makeText(
@@ -1513,6 +1544,238 @@ fun PlayerScreen(
                     }
                 }
             }
+        }
+
+        // 7. 10-Second Idle TV Cast Ambient Silk Screensaver (wakes immediately on any touch)
+        AnimatedVisibility(
+            visible = showTvScreensaver && connectedTv != null,
+            enter = fadeIn(animationSpec = tween(700)),
+            exit = fadeOut(animationSpec = tween(260)),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            TvCastAmbientScreensaver(
+                tvName = connectedTv?.name ?: "Smart TV",
+                title = currentTitle.ifBlank { animeBaseTitle },
+                onWake = {
+                    showTvScreensaver = false
+                    showControls = true
+                    lastInteractionTick++
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvCastAmbientScreensaver(
+    tvName: String,
+    title: String,
+    onWake: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "tv_silk_screensaver")
+    val phaseA by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 8500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "silk_phase_a"
+    )
+    val phaseB by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 12500, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "silk_phase_b"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFAFAFC))
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    onWake()
+                }
+            }
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+            val sinA = sin(phaseA)
+            val cosA = cos(phaseA)
+            val sinB = sin(phaseB)
+            val cosB = cos(phaseB)
+
+            // 1. Broad luminous violet-indigo silk aura bloom
+            val violetCenter = Offset(
+                x = w * (0.46f + 0.14f * cosA),
+                y = h * (0.38f + 0.18f * sinB)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xD8763DFF),
+                        Color(0x9E905BFF),
+                        Color(0x38B188FF),
+                        Color.Transparent
+                    ),
+                    center = violetCenter,
+                    radius = max(w, h) * 0.44f
+                ),
+                center = violetCenter,
+                radius = max(w, h) * 0.44f
+            )
+
+            // 2. Broad luminous coral-vermilion orange-red silk bloom
+            val coralCenter = Offset(
+                x = w * (0.52f - 0.15f * sinA),
+                y = h * (0.58f - 0.16f * cosB)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xEEFF4518),
+                        Color(0xBBFF6432),
+                        Color(0x44FF9668),
+                        Color.Transparent
+                    ),
+                    center = coralCenter,
+                    radius = max(w, h) * 0.46f
+                ),
+                center = coralCenter,
+                radius = max(w, h) * 0.46f
+            )
+
+            // 3. Magenta-crimson blending core where violet & orange ribbons twist together
+            val blendCenter = Offset(
+                x = w * (0.50f + 0.10f * sinB),
+                y = h * (0.48f + 0.12f * cosA)
+            )
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xCCE01E5A),
+                        Color(0x70FF3B30),
+                        Color.Transparent
+                    ),
+                    center = blendCenter,
+                    radius = max(w, h) * 0.30f
+                ),
+                center = blendCenter,
+                radius = max(w, h) * 0.30f
+            )
+
+            // 4. Primary sweeping diagonal silk fold ribbon (bottom-left to top-right)
+            val foldShiftY = h * 0.16f * sinA
+            val foldShiftX = w * 0.12f * cosB
+            val ribbonPath = Path().apply {
+                moveTo(-w * 0.10f, h * (0.98f + 0.10f * cosA))
+                cubicTo(
+                    w * (0.26f + 0.08f * sinB), h * (0.72f + 0.15f * sinA),
+                    w * (0.58f + 0.10f * cosA), h * (0.28f - 0.12f * sinB),
+                    w * 1.08f, h * (0.04f + 0.14f * sinA)
+                )
+                lineTo(w * 1.15f, h * (0.42f + 0.12f * cosB))
+                cubicTo(
+                    w * (0.76f - 0.08f * sinA), h * (0.58f + 0.14f * cosA),
+                    w * (0.44f + 0.06f * cosB), h * (0.86f - 0.10f * sinA),
+                    w * 0.12f, h * 1.15f
+                )
+                close()
+            }
+            drawPath(
+                path = ribbonPath,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0x00FF5722),
+                        Color(0xC8FF4518),
+                        Color(0xB8E0215A),
+                        Color(0xB0733BFF),
+                        Color(0x00733BFF)
+                    ),
+                    start = Offset(w * 0.10f + foldShiftX, h * 0.90f + foldShiftY),
+                    end = Offset(w * 0.90f - foldShiftX, h * 0.10f - foldShiftY)
+                )
+            )
+
+            // 5. Crisp diagonal luminous white silk spine (refraction ridge from reference video)
+            val ridgePath = Path().apply {
+                moveTo(-w * 0.05f, h * (1.02f + 0.08f * cosA))
+                cubicTo(
+                    w * (0.30f + 0.09f * sinB), h * (0.70f + 0.14f * sinA),
+                    w * (0.58f + 0.08f * cosA), h * (0.30f - 0.14f * sinB),
+                    w * 1.05f, h * (-0.04f + 0.10f * sinA)
+                )
+            }
+            drawPath(
+                path = ridgePath,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color(0x00FFFFFF),
+                        Color(0xE8FFFFFF),
+                        Color(0xF5FFFFFF),
+                        Color(0x00FFFFFF)
+                    ),
+                    start = Offset(0f, h),
+                    end = Offset(w, 0f)
+                ),
+                style = Stroke(width = max(w, h) * 0.022f, cap = StrokeCap.Round)
+            )
+
+            // 6. Soft white corner veil so edges stay airy and clean like reference video
+            val topLeftVeil = Offset(0f, 0f)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color(0xEEFAFAFC), Color(0x88FAFAFC), Color.Transparent),
+                    center = topLeftVeil,
+                    radius = max(w, h) * 0.42f
+                ),
+                center = topLeftVeil,
+                radius = max(w, h) * 0.42f
+            )
+            val bottomRightVeil = Offset(w, h)
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color(0xEEFAFAFC), Color(0x88FAFAFC), Color.Transparent),
+                    center = bottomRightVeil,
+                    radius = max(w, h) * 0.44f
+                ),
+                center = bottomRightVeil,
+                radius = max(w, h) * 0.44f
+            )
+        }
+
+        // Subtle minimal pill showing active TV connection at bottom center
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 26.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color(0x88FFFFFF))
+                .border(1.dp, Color(0xAAFFFFFF), RoundedCornerShape(50))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.CastConnected,
+                contentDescription = null,
+                tint = Color(0xFF5A2DE8),
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = "$tvName • $title",
+                color = Color(0xCC161622),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -2029,6 +2292,89 @@ object DlnaTvCastHelper {
             !code.isNullOrBlank() -> "$stage $httpCode (UPnP $code)"
             else -> "$stage HTTP $httpCode"
         }
+    }
+
+    suspend fun pauseCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
+        val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+        val pauseBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            "<s:Body>" +
+            "<u:Pause xmlns:u=\"$svc\">" +
+            "<InstanceID>0</InstanceID>" +
+            "</u:Pause>" +
+            "</s:Body>" +
+            "</s:Envelope>"
+
+        val res = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml;charset=\"utf-8\"",
+                "SOAPAction" to "\"$svc#Pause\""
+            ),
+            body = pauseBody,
+            readTimeoutMs = 4000
+        )
+        res != null && res.first in 200..299
+    }
+
+    suspend fun resumeCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
+        val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+        val playBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            "<s:Body>" +
+            "<u:Play xmlns:u=\"$svc\">" +
+            "<InstanceID>0</InstanceID>" +
+            "<Speed>1</Speed>" +
+            "</u:Play>" +
+            "</s:Body>" +
+            "</s:Envelope>"
+
+        val res = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml;charset=\"utf-8\"",
+                "SOAPAction" to "\"$svc#Play\""
+            ),
+            body = playBody,
+            readTimeoutMs = 4000
+        )
+        res != null && res.first in 200..299
+    }
+
+    suspend fun seekCast(device: DlnaTvDevice, positionMs: Long): Boolean = withContext(Dispatchers.IO) {
+        val svc = device.serviceType.ifBlank { "urn:schemas-upnp-org:service:AVTransport:1" }
+        val totalSec = max(0L, positionMs / 1000L)
+        val target = String.format(
+            Locale.US,
+            "%02d:%02d:%02d",
+            totalSec / 3600L,
+            (totalSec % 3600L) / 60L,
+            totalSec % 60L
+        )
+        val seekBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">" +
+            "<s:Body>" +
+            "<u:Seek xmlns:u=\"$svc\">" +
+            "<InstanceID>0</InstanceID>" +
+            "<Unit>REL_TIME</Unit>" +
+            "<Target>$target</Target>" +
+            "</u:Seek>" +
+            "</s:Body>" +
+            "</s:Envelope>"
+
+        val res = httpRawRequest(
+            urlStr = device.controlUrl,
+            method = "POST",
+            headers = mapOf(
+                "Content-Type" to "text/xml;charset=\"utf-8\"",
+                "SOAPAction" to "\"$svc#Seek\""
+            ),
+            body = seekBody,
+            readTimeoutMs = 4000
+        )
+        res != null && res.first in 200..299
     }
 
     suspend fun stopCast(device: DlnaTvDevice): Boolean = withContext(Dispatchers.IO) {
