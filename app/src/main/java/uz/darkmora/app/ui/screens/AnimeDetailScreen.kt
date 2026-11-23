@@ -1,13 +1,16 @@
 package uz.darkmora.app.ui.screens
 
+import android.content.Intent
 import android.util.Base64
 import android.widget.Toast
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,11 +21,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +52,7 @@ fun AnimeDetailScreen(
 ) {
     val context = LocalContext.current
     val sessionManager = remember { UserSessionManager(context) }
+    val listState = rememberLazyListState()
 
     var anime by remember { mutableStateOf<Anime?>(null) }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
@@ -102,6 +111,18 @@ fun AnimeDetailScreen(
         openEpisodePlayer(a, ep)
     }
 
+    fun shareAnime(a: Anime) {
+        try {
+            val url = "https://darkmora.uz/anime/${a.getEffectiveSlug()}"
+            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, a.displayTitle())
+                putExtra(Intent.EXTRA_TEXT, "${a.displayTitle()}\n$url")
+            }
+            context.startActivity(Intent.createChooser(sendIntent, tr("Ulashish", "Share", "Поделиться")))
+        } catch (_: Exception) {}
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -112,17 +133,40 @@ fun AnimeDetailScreen(
                 ShimmerBox(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(310.dp),
+                        .height(210.dp),
                     cornerRadius = 0.dp
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .height(310.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    ShimmerBox(
+                        modifier = Modifier
+                            .weight(0.70f)
+                            .fillMaxHeight(),
+                        cornerRadius = 18.dp
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(0.30f)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        ShimmerBox(modifier = Modifier.fillMaxWidth().weight(1f), cornerRadius = 16.dp)
+                        ShimmerBox(modifier = Modifier.fillMaxWidth().weight(1f), cornerRadius = 16.dp)
+                        ShimmerBox(modifier = Modifier.fillMaxWidth().weight(1f), cornerRadius = 16.dp)
+                    }
+                }
                 Column(
-                    modifier = Modifier.padding(18.dp),
+                    modifier = Modifier.padding(horizontal = 18.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.7f).height(28.dp), cornerRadius = 10.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.5f).height(20.dp), cornerRadius = 10.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(95.dp), cornerRadius = 18.dp)
-                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), cornerRadius = 50.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), cornerRadius = 16.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth(0.4f).height(22.dp), cornerRadius = 8.dp)
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(42.dp), cornerRadius = 24.dp)
                 }
             }
         } else if (anime != null) {
@@ -133,130 +177,176 @@ fun AnimeDetailScreen(
             var selectedChunkIndex by remember { mutableIntStateOf(0) }
             val visibleEpisodes = if (chunks.isNotEmpty()) chunks.getOrElse(selectedChunkIndex) { episodes } else emptyList()
 
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 90.dp)
-            ) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(340.dp)
-                    ) {
-                        // Blurred atmospheric backdrop so any text baked into the poster never clashes with the foreground UI!
-                        AsyncImage(
-                            model = a.banner ?: a.displayPoster(),
-                            contentDescription = a.displayTitle(),
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .blur(20.dp)
-                        )
+            val genreList = remember(a.genres, a.janri) {
+                a.displayGenres()
+                    .split(",", "•", "/", ";")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+            }
 
-                        // Strong smooth theme-aware fade gradient
+            val localizedStatus = remember(a.status, AppThemeState.language) {
+                val raw = a.displayStatus().lowercase()
+                when {
+                    raw.contains("tugallangan") || raw.contains("released") || raw.contains("finished") ->
+                        tr("Tugallangan", "RELEASED", "ВЫШЕЛ")
+                    raw.contains("davom") || raw.contains("ongoing") ->
+                        tr("Ongoin", "ONGOING", "ОНГОИНГ")
+                    else -> a.displayStatus().uppercase()
+                }
+            }
+
+            val episodeCountLabel = remember(episodes.size, a.epCount, a.lastQism, a.qism, a.episodesCount, a.qismlarSoni) {
+                when {
+                    episodes.isNotEmpty() -> episodes.size.toString()
+                    a.displayEpisodes().isNotEmpty() -> a.displayEpisodes()
+                    else -> "—"
+                }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 104.dp)
+            ) {
+                // ============================================================
+                // 1. HERO BACKDROP + HEADER + TITLE/BADGES + POSTER & 3 STATS
+                // ============================================================
+                item {
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        // Blurred atmospheric top backdrop fading smoothly into BgDark
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.verticalGradient(
-                                        colors = listOf(
-                                            BgDark.copy(alpha = 0.45f),
-                                            BgDark.copy(alpha = 0.65f),
-                                            BgDark.copy(alpha = 0.92f),
-                                            BgDark
-                                        )
-                                    )
-                                )
-                        )
-
-                        // Clean Top Action Buttons
-                        Row(
-                            modifier = Modifier
                                 .fillMaxWidth()
-                                .statusBarsPadding()
-                                .padding(horizontal = 18.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .bounceClick(onClick = onBackClick)
-                                    .clip(CircleShape)
-                                    .background(BgCard)
-                                    .border(0.8.dp, CardBorder, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Orqaga", tint = TextPrimary, modifier = Modifier.size(20.dp))
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .bounceClick {
-                                        isFavorite = sessionManager.toggleFavoriteAnime(a)
-                                        val tok = sessionManager.getToken()
-                                        if (!tok.isNullOrBlank()) {
-                                            scope.launch {
-                                                try {
-                                                    DarkmoraApi.toggleBookmark(tok, a.id)
-                                                } catch (_: Exception) {}
-                                            }
-                                        }
-                                        val msg = if (isFavorite) {
-                                            tr("Sevimlilarga qo'shildi", "Added to Favorites", "Добавлено в избранное")
-                                        } else {
-                                            tr("Sevimlilardan olib tashlandi", "Removed from Favorites", "Удалено из избранного")
-                                        }
-                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                                    }
-                                    .clip(CircleShape)
-                                    .background(if (isFavorite) PrimaryBlue else BgCard)
-                                    .border(0.8.dp, if (isFavorite) PrimaryBlue else CardBorder, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                                    contentDescription = "Sevimlilar",
-                                    tint = if (isFavorite) Color.White else TextPrimary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        // Foreground Sharp Poster + Clean High-Contrast Meta Info
-                        Row(
-                            modifier = Modifier
-                                .align(Alignment.BottomStart)
-                                .fillMaxWidth()
-                                .padding(horizontal = 18.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            verticalAlignment = Alignment.Bottom
+                                .height(290.dp)
                         ) {
                             AsyncImage(
-                                model = a.displayPoster(),
+                                model = a.banner ?: a.displayPoster(),
                                 contentDescription = a.displayTitle(),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .width(112.dp)
-                                    .height(160.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(BgCard)
-                                    .border(1.dp, CardBorder, RoundedCornerShape(18.dp))
+                                    .fillMaxSize()
+                                    .blur(12.dp)
                             )
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                BgDark.copy(alpha = 0.30f),
+                                                BgDark.copy(alpha = 0.55f),
+                                                BgDark.copy(alpha = 0.90f),
+                                                BgDark
+                                            )
+                                        )
+                                    )
+                            )
+                        }
 
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .statusBarsPadding()
+                        ) {
+                            // Top Bar: Back (left) + Share & Bookmark (right)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .bounceClick(onClick = onBackClick)
+                                        .clip(CircleShape)
+                                        .background(BgCard.copy(alpha = 0.78f))
+                                        .border(0.8.dp, CardBorder, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowBackIosNew,
+                                        contentDescription = tr("Orqaga", "Back", "Назад"),
+                                        tint = TextPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .bounceClick { shareAnime(a) }
+                                            .clip(CircleShape)
+                                            .background(BgCard.copy(alpha = 0.78f))
+                                            .border(0.8.dp, CardBorder, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = tr("Ulashish", "Share", "Поделиться"),
+                                            tint = TextPrimary,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .bounceClick {
+                                                isFavorite = sessionManager.toggleFavoriteAnime(a)
+                                                val tok = sessionManager.getToken()
+                                                if (!tok.isNullOrBlank()) {
+                                                    scope.launch {
+                                                        try {
+                                                            DarkmoraApi.toggleBookmark(tok, a.id)
+                                                        } catch (_: Exception) {}
+                                                    }
+                                                }
+                                                val msg = if (isFavorite) {
+                                                    tr("Sevimlilarga qo'shildi", "Added to Favorites", "Добавлено в избранное")
+                                                } else {
+                                                    tr("Sevimlilardan olib tashlandi", "Removed from Favorites", "Удалено из избранного")
+                                                }
+                                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                            }
+                                            .clip(CircleShape)
+                                            .background(if (isFavorite) PrimaryBlue else BgCard.copy(alpha = 0.78f))
+                                            .border(0.8.dp, if (isFavorite) PrimaryBlue else CardBorder, CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                            contentDescription = tr("Sevimlilar", "Favorites", "Избранное"),
+                                            tint = if (isFavorite) Color.White else TextPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Right-aligned Title + Rating & Views Badges
                             Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .padding(bottom = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp),
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Text(
                                     text = a.displayTitle(),
                                     color = TextPrimary,
-                                    fontSize = 20.sp,
+                                    fontSize = 23.sp,
                                     fontWeight = FontWeight.ExtraBold,
-                                    lineHeight = 25.sp,
+                                    lineHeight = 28.sp,
+                                    textAlign = TextAlign.End,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -265,48 +355,214 @@ fun AnimeDetailScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // High-contrast Rating Pill (TextPrimary in both Dark & Light modes!)
+                                    // Rating Badge (Accent Gold pill matching DarkMora palette)
                                     Row(
                                         modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .background(BgCard)
-                                            .border(0.8.dp, CardBorder, RoundedCornerShape(50))
-                                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(RatingGold)
+                                            .padding(horizontal = 11.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        Icon(Icons.Default.Star, contentDescription = null, tint = RatingGold, modifier = Modifier.size(13.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Star,
+                                            contentDescription = null,
+                                            tint = Color(0xFF0A0B10),
+                                            modifier = Modifier.size(15.dp)
+                                        )
                                         Text(
                                             text = a.displayRating(),
-                                            color = TextPrimary,
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold
+                                            color = Color(0xFF0A0B10),
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold
                                         )
                                     }
 
-                                    Text("•", color = TextDim, fontSize = 12.sp)
-                                    Text(
-                                        text = a.displayYear(),
-                                        color = TextMuted,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.SemiBold
+                                    // Views / Audience Badge (High-contrast adaptive pill)
+                                    val viewsBg = if (AppThemeState.isDark) Color(0xFFE2E8F0) else Color(0xFF1E293B)
+                                    val viewsFg = if (AppThemeState.isDark) Color(0xFF0A0B10) else Color(0xFFF8FAFC)
+                                    Row(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(viewsBg)
+                                            .padding(horizontal = 11.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Person,
+                                            contentDescription = null,
+                                            tint = viewsFg,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Text(
+                                            text = a.displayViews(),
+                                            color = viewsFg,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.ExtraBold
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(18.dp))
+
+                            // Main Poster (70%) + 3 Vertical Info Cards (30%)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp)
+                                    .height(335.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Left: Large Vertical Poster with Diagonal Corner Ribbon
+                                Box(
+                                    modifier = Modifier
+                                        .weight(0.71f)
+                                        .fillMaxHeight()
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .background(BgCard)
+                                        .border(1.dp, CardBorder, RoundedCornerShape(18.dp))
+                                ) {
+                                    AsyncImage(
+                                        model = a.displayPoster(),
+                                        contentDescription = a.displayTitle(),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
                                     )
-                                    Text("•", color = TextDim, fontSize = 12.sp)
-                                    Text(
-                                        text = "${episodes.size} ${tr("qism", "ep", "сер.")}",
-                                        color = PrimaryBlue,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
+
+                                    // Top-right diagonal type ribbon ("TV", "FILM", "OVA", ...)
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 26.dp, y = 14.dp)
+                                            .graphicsLayer { rotationZ = 45f }
+                                            .width(96.dp)
+                                            .background(PrimaryBlue)
+                                            .padding(vertical = 3.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = a.displayShortType(),
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            letterSpacing = 0.8.sp
+                                        )
+                                    }
+                                }
+
+                                // Right: 3 Equal Stacked Info Cards (Status, Episodes, Year)
+                                Column(
+                                    modifier = Modifier
+                                        .weight(0.29f)
+                                        .fillMaxHeight(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    AnimeMetaStatCard(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.DonutLarge,
+                                        label = tr("Holati", "Status", "Статус"),
+                                        value = localizedStatus,
+                                        isCompactValue = true
+                                    )
+                                    AnimeMetaStatCard(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.Movie,
+                                        label = tr("Qismlar", "Episodes", "Эпизоды"),
+                                        value = episodeCountLabel,
+                                        isCompactValue = false
+                                    )
+                                    AnimeMetaStatCard(
+                                        modifier = Modifier.weight(1f),
+                                        icon = Icons.Default.CalendarMonth,
+                                        label = tr("Yili", "Year", "Год"),
+                                        value = a.displayYear(),
+                                        isCompactValue = false
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ============================================================
+                // 2. SIGNATURE SPLIT "KO'RISH / WATCH" ACTION BUTTON
+                // ============================================================
+                item {
+                    Spacer(modifier = Modifier.height(18.dp))
+
+                    if (episodes.isNotEmpty()) {
+                        val targetEp = episodes.find { it.qism == lastWatchedEp } ?: episodes.first()
+                        val buttonLabel = if (lastWatchedEp > 0) {
+                            tr(
+                                "${targetEp.qism}-QISMNI DAVOM ETTIRISH",
+                                "CONTINUE EPISODE ${targetEp.qism}",
+                                "ПРОДОЛЖИТЬ ${targetEp.qism} СЕРИЮ"
+                            )
+                        } else {
+                            tr("KO'RISH", "WATCH", "СМОТРЕТЬ")
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp)
+                                .height(56.dp)
+                                .bounceClick { launchEpisode(a, targetEp) }
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(BgCard)
+                                .border(1.4.dp, PrimaryBlue, RoundedCornerShape(16.dp))
+                        ) {
+                            // Left angled accent block (trapezoid) matching the reference button
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val topW = 74.dp.toPx()
+                                val bottomW = 60.dp.toPx()
+                                val path = Path().apply {
+                                    moveTo(0f, 0f)
+                                    lineTo(topW, 0f)
+                                    lineTo(bottomW, size.height)
+                                    lineTo(0f, size.height)
+                                    close()
+                                }
+                                drawPath(
+                                    path = path,
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(PrimaryBlue, PrimaryGlow)
+                                    )
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(66.dp)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(28.dp)
                                     )
                                 }
 
-                                val genres = a.displayGenres()
-                                if (genres.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(end = 16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
-                                        text = genres.replaceFirstChar { it.uppercase() },
-                                        color = TextMuted,
-                                        fontSize = 12.5.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        text = buttonLabel,
+                                        color = TextPrimary,
+                                        fontSize = if (lastWatchedEp > 0) 14.sp else 16.5.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 1.1.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -316,65 +572,75 @@ fun AnimeDetailScreen(
                     }
                 }
 
+                // ============================================================
+                // 3. GENRES PILLS ROW + DESCRIPTION + EPISODES HEADER
+                // ============================================================
                 item {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 18.dp, vertical = 14.dp)
+                            .padding(top = 22.dp)
                     ) {
-                        // Clean Soft Description Card
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(BgCard)
-                                .border(0.8.dp, CardBorder, RoundedCornerShape(18.dp))
-                                .padding(16.dp)
-                        ) {
+                        if (genreList.isNotEmpty()) {
                             Text(
-                                text = a.displayDescription(),
-                                color = TextMuted,
-                                fontSize = 13.sp,
-                                lineHeight = 20.sp
+                                text = tr("Janrlar:", "Genres:", "Жанры:"),
+                                color = TextPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 18.dp)
                             )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 18.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(genreList) { genre ->
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(BgCard)
+                                            .border(0.9.dp, CardBorder, RoundedCornerShape(50))
+                                            .padding(horizontal = 16.dp, vertical = 9.dp)
+                                    ) {
+                                        Text(
+                                            text = genre.replaceFirstChar { it.uppercase() },
+                                            color = TextPrimary,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(18.dp))
                         }
 
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Play / Resume Episode Button
-                        if (episodes.isNotEmpty()) {
-                            val targetEp = episodes.find { it.qism == lastWatchedEp } ?: episodes.first()
-                            val buttonLabel = if (lastWatchedEp > 0) {
-                                tr("${targetEp.qism}-Qismni Davom Ettirish", "Continue Episode ${targetEp.qism}", "Продолжить ${targetEp.qism} серию")
-                            } else {
-                                tr("1-Qismni Boshlash", "Start Episode 1", "Начать 1 серию")
-                            }
-
-                            Row(
+                        // Soft Description Card
+                        val desc = a.displayDescription().trim()
+                        if (desc.isNotEmpty() && desc != "Tavsif mavjud emas.") {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .bounceClick { launchEpisode(a, targetEp) }
-                                    .clip(RoundedCornerShape(50))
-                                    .background(TextPrimary)
-                                    .padding(vertical = 15.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 18.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(BgCard)
+                                    .border(0.8.dp, CardBorder, RoundedCornerShape(18.dp))
+                                    .padding(16.dp)
                             ) {
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = BgSurface, modifier = Modifier.size(22.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = buttonLabel,
-                                    color = BgSurface,
-                                    fontSize = 15.5.sp,
-                                    fontWeight = FontWeight.Bold
+                                    text = desc,
+                                    color = TextMuted,
+                                    fontSize = 13.sp,
+                                    lineHeight = 20.sp
                                 )
                             }
+                            Spacer(modifier = Modifier.height(20.dp))
                         }
 
-                        Spacer(modifier = Modifier.height(22.dp))
-
+                        // Episodes Header
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 18.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -382,7 +648,7 @@ fun AnimeDetailScreen(
                                 text = "${tr("Qismlar", "Episodes", "Серии")} (${episodes.size})",
                                 color = TextPrimary,
                                 fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.ExtraBold
                             )
                             if (lastWatchedEp > 0) {
                                 Text(
@@ -397,6 +663,7 @@ fun AnimeDetailScreen(
                         if (chunks.size > 1) {
                             Spacer(modifier = Modifier.height(10.dp))
                             LazyRow(
+                                contentPadding = PaddingValues(horizontal = 18.dp),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(chunks.indices.toList()) { idx ->
@@ -408,17 +675,17 @@ fun AnimeDetailScreen(
                                         modifier = Modifier
                                             .bounceClick { selectedChunkIndex = idx }
                                             .clip(RoundedCornerShape(50))
-                                            .background(if (isSelected) TextPrimary else BgCard)
+                                            .background(if (isSelected) PrimaryBlue else BgCard)
                                             .border(
                                                 width = 0.8.dp,
-                                                color = if (isSelected) TextPrimary else CardBorder,
+                                                color = if (isSelected) PrimaryBlue else CardBorder,
                                                 shape = RoundedCornerShape(50)
                                             )
                                             .padding(horizontal = 16.dp, vertical = 7.dp)
                                     ) {
                                         Text(
                                             text = "$firstNum - $lastNum",
-                                            color = if (isSelected) BgSurface else TextMuted,
+                                            color = if (isSelected) Color.White else TextMuted,
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -431,7 +698,9 @@ fun AnimeDetailScreen(
                     }
                 }
 
-                // Clean Minimalist Episodes List
+                // ============================================================
+                // 4. EPISODES LIST
+                // ============================================================
                 items(visibleEpisodes) { ep ->
                     val isLastWatched = ep.qism == lastWatchedEp
                     Box(
@@ -455,7 +724,8 @@ fun AnimeDetailScreen(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -510,6 +780,35 @@ fun AnimeDetailScreen(
                     }
                 }
             }
+
+            // Floating Quick-Jump Button to Episodes (matching the circular FAB in reference, in DarkMora PrimaryBlue)
+            if (episodes.isNotEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
+                        .padding(end = 20.dp, bottom = 22.dp)
+                        .size(56.dp)
+                        .shadow(10.dp, CircleShape, ambientColor = PrimaryBlue, spotColor = PrimaryBlue)
+                        .bounceClick {
+                            scope.launch {
+                                listState.animateScrollToItem(3)
+                            }
+                        }
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(listOf(PrimaryBlue, PrimaryGlow))
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Menu,
+                        contentDescription = tr("Qismlar", "Episodes", "Серии"),
+                        tint = Color.White,
+                        modifier = Modifier.size(25.dp)
+                    )
+                }
+            }
         }
 
         if (showAuthDialog) {
@@ -527,5 +826,51 @@ fun AnimeDetailScreen(
                 }
             )
         }
+    }
+}
+
+@Composable
+private fun AnimeMetaStatCard(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    label: String,
+    value: String,
+    isCompactValue: Boolean = false
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(BgCard)
+            .border(0.9.dp, CardBorder, RoundedCornerShape(16.dp))
+            .padding(horizontal = 6.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = TextPrimary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = label,
+            color = TextDim,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = value,
+            color = TextPrimary,
+            fontSize = if (isCompactValue) 11.sp else 17.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
     }
 }
