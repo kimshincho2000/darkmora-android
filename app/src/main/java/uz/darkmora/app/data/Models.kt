@@ -20,8 +20,6 @@ data class Anime(
     val country: String? = null,
     val lang: String? = null,
     val status: String? = null,
-    val turi: String? = null,
-    val views: Int? = null,
     val description: String? = null,
     val tavsif: String? = null,
     @SerializedName("ep_count") val epCount: Any? = null,
@@ -35,21 +33,6 @@ data class Anime(
     fun displayRating(): String = rating ?: reyting ?: "8.5"
     fun displayYear(): String = year ?: yili ?: "2024"
     fun displayGenres(): String = genres ?: janri ?: ""
-    fun displayViews(): String {
-        val v = views ?: 0
-        return v.toString()
-    }
-    fun displayShortType(): String {
-        val t = (turi ?: "").lowercase()
-        return when {
-            t.contains("film") || t.contains("movie") -> "FILM"
-            t.contains("ova") -> "OVA"
-            t.contains("ona") -> "ONA"
-            t.contains("special") -> "SP"
-            else -> "TV"
-        }
-    }
-    fun displayStatus(): String = status?.takeIf { it.isNotBlank() } ?: "Tugallangan"
     fun displayEpisodes(): String {
         val raw = (lastQism ?: qism ?: epCount ?: episodesCount ?: qismlarSoni ?: "")
             .toString()
