@@ -209,6 +209,14 @@ object OfflineDownloadManager {
     private fun launchTaskLocked(task: QueuedDownloadTask) {
         val slug = task.anime.getEffectiveSlug()
         val k = task.key
+        val initialQueued = pendingQueue.size
+
+        OfflineDownloadForegroundService.start(
+            context = task.appCtx,
+            title = task.anime.displayTitle(),
+            qism = task.episode.qism,
+            queuedCount = initialQueued
+        )
 
         scope.launch(Dispatchers.Main) {
             activeDownloads[k] = ActiveDownloadState(
@@ -261,6 +269,7 @@ object OfflineDownloadManager {
                     val totalBytes = body.contentLength()
                     var downloadedBytes = 0L
                     var lastUiUpdate = 0L
+                    var lastNotifUpdate = 0L
 
                     body.byteStream().use { input ->
                         FileOutputStream(partFile).use { output ->
@@ -273,13 +282,14 @@ object OfflineDownloadManager {
                                 downloadedBytes += read
 
                                 val now = System.currentTimeMillis()
+                                val prog = if (totalBytes > 0L) {
+                                    (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                                } else {
+                                    0f
+                                }
+
                                 if (now - lastUiUpdate >= 220L) {
                                     lastUiUpdate = now
-                                    val prog = if (totalBytes > 0L) {
-                                        (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-                                    } else {
-                                        0f
-                                    }
                                     withContext(Dispatchers.Main) {
                                         activeDownloads[k] = ActiveDownloadState(
                                             slug = slug,
@@ -290,6 +300,20 @@ object OfflineDownloadManager {
                                             isQueued = false
                                         )
                                     }
+                                }
+
+                                if (now - lastNotifUpdate >= 600L) {
+                                    lastNotifUpdate = now
+                                    val qCount = synchronized(queueLock) { pendingQueue.size }
+                                    OfflineDownloadForegroundService.updateProgress(
+                                        context = task.appCtx,
+                                        title = task.anime.displayTitle(),
+                                        qism = task.episode.qism,
+                                        progress = (prog * 100).toInt(),
+                                        downloadedBytes = downloadedBytes,
+                                        totalBytes = totalBytes,
+                                        queuedCount = qCount
+                                    )
                                 }
                             }
                             output.flush()
@@ -363,6 +387,7 @@ object OfflineDownloadManager {
                     task.onResult(false, e.message ?: "Yuklab olishda xatolik")
                 }
             } finally {
+                var stopService = false
                 synchronized(queueLock) {
                     if (currentRunningKey == k) {
                         currentRunningKey = null
@@ -371,10 +396,27 @@ object OfflineDownloadManager {
                         if (next != null) {
                             currentRunningKey = next.key
                             launchTaskLocked(next)
+                        } else {
+                            stopService = true
                         }
                     }
                 }
+                if (stopService) {
+                    OfflineDownloadForegroundService.stop(task.appCtx)
+                }
             }
+        }
+    }
+
+    fun cancelAll() {
+        synchronized(queueLock) {
+            pendingQueue.clear()
+            currentJob?.cancel()
+            currentRunningKey = null
+            currentJob = null
+        }
+        scope.launch(Dispatchers.Main) {
+            activeDownloads.clear()
         }
     }
 
