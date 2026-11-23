@@ -72,6 +72,7 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -301,7 +302,8 @@ fun PlayerScreen(
         if (currentVideoUrl.isNotBlank()) {
             isBuffering = true
             errorMessage = null
-            val mediaSource = DefaultMediaSourceFactory(httpDataSourceFactory)
+            val dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            val mediaSource = DefaultMediaSourceFactory(dataSourceFactory)
                 .createMediaSource(MediaItem.fromUri(Uri.parse(currentVideoUrl)))
             exoPlayer.setMediaSource(mediaSource)
             exoPlayer.prepare()

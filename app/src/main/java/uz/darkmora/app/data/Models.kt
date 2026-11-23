@@ -192,3 +192,30 @@ data class ToggleBookmarkResponse(
     val error: String? = null,
     val data: ToggleBookmarkData? = null
 )
+
+data class AnimeComment(
+    val id: Int = 0,
+    @SerializedName("anime_id") val animeId: Int = 0,
+    @SerializedName("user_id") val userId: Long? = null,
+    val username: String = "Foydalanuvchi",
+    @SerializedName("photo_url") val photoUrl: String? = null,
+    val text: String = "",
+    @SerializedName("created_at") val createdAt: Long = 0L
+)
+
+data class CommentsData(
+    val comments: List<AnimeComment>? = emptyList(),
+    val total: Int = 0
+)
+
+data class CommentsResponse(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val data: CommentsData? = null
+)
+
+data class AddCommentResponse(
+    val ok: Boolean = false,
+    val error: String? = null,
+    val data: AnimeComment? = null
+)

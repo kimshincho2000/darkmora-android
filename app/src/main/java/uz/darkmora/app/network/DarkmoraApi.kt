@@ -249,12 +249,38 @@ object DarkmoraApi {
         executeJson(reqBuilder.build())
     }
 
+    // --- COMMENTS METHODS ---
+
+    suspend fun getComments(animeId: Int, limit: Int = 50): CommentsResponse = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$BASE_URL?action=get_comments&anime_id=$animeId&limit=$limit")
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun addComment(token: String, animeId: Int, text: String): AddCommentResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf(
+            "anime_id" to animeId,
+            "text" to text
+        )
+        val body = gson.toJson(payload).toRequestBody(JSON_MEDIA)
+        val reqBuilder = Request.Builder()
+            .url("$BASE_URL?action=add_comment")
+            .post(body)
+        if (token.isNotBlank()) {
+            reqBuilder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(reqBuilder.build())
+    }
+
     // --- AUTO-UPDATE METHOD ---
 
-    suspend fun checkUpdate(): CheckUpdateResponse = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
+    suspend fun checkUpdate(token: String? = null): CheckUpdateResponse = withContext(Dispatchers.IO) {
+        val builder = Request.Builder()
             .url("$BASE_URL?action=check_update")
-            .build()
-        executeJson(request)
+        if (!token.isNullOrBlank()) {
+            builder.addHeader("Authorization", "Bearer $token")
+        }
+        executeJson(builder.build())
     }
 }

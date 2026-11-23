@@ -144,7 +144,7 @@ fun MainApp(
         }
 
         try {
-            val res = DarkmoraApi.checkUpdate()
+            val res = DarkmoraApi.checkUpdate(sessionManager.getToken())
             if (res.ok && res.data != null && res.data.versionCode > BuildConfig.VERSION_CODE) {
                 autoUpdateInfo = res.data
                 showAutoUpdateDialog = true
@@ -174,6 +174,32 @@ fun MainApp(
                 MainTabsScreen(
                     onAnimeClick = { slug ->
                         navController.navigate("detail/$slug")
+                    },
+                    onDownloadsClick = {
+                        navController.navigate("downloads")
+                    }
+                )
+            }
+
+            composable("downloads") {
+                DownloadsScreen(
+                    onBackClick = { navController.popBackStack() },
+                    onOfflineAnimeClick = { slug ->
+                        navController.navigate("offline_detail/$slug")
+                    }
+                )
+            }
+
+            composable(
+                route = "offline_detail/{slug}",
+                arguments = listOf(navArgument("slug") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val slug = backStackEntry.arguments?.getString("slug") ?: ""
+                OfflineAnimeDetailScreen(
+                    slug = slug,
+                    onBackClick = { navController.popBackStack() },
+                    onPlayEpisode = { b64Url, b64Title, animeSlug, epNum ->
+                        navController.navigate("player/$b64Url/$b64Title?slug=$animeSlug&ep=$epNum")
                     }
                 )
             }
@@ -249,7 +275,8 @@ data class NavItem(
 
 @Composable
 fun MainTabsScreen(
-    onAnimeClick: (String) -> Unit
+    onAnimeClick: (String) -> Unit,
+    onDownloadsClick: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
 
@@ -312,6 +339,7 @@ fun MainTabsScreen(
                             )
                         }
                     },
+                    onNavigateToDownloads = onDownloadsClick,
                     onAnimeClick = onAnimeClick
                 )
             }

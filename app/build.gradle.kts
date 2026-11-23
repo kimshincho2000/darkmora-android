@@ -12,8 +12,8 @@ android {
         applicationId = "uz.darkmora.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 37
-        versionName = "0.3.20"
+        versionCode = 38
+        versionName = "0.3.21"
     }
 
     signingConfigs {

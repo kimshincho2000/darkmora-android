@@ -60,11 +60,16 @@ import java.io.File
 @Composable
 fun ProfileScreen(
     onNavigateToFavorites: () -> Unit,
+    onNavigateToDownloads: () -> Unit = {},
     onAnimeClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val sessionManager = remember { UserSessionManager(context) }
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        OfflineDownloadManager.init(context)
+    }
 
     var isLoggedIn by remember { mutableStateOf(sessionManager.isLoggedIn()) }
     var user by remember { mutableStateOf(sessionManager.getUser()) }
@@ -439,6 +444,14 @@ fun ProfileScreen(
                 trailingText = "${sessionManager.getFavorites().size} ${tr("ta", "items", "шт.")}",
                 onClick = onNavigateToFavorites
             )
+            ProfileRowDivider()
+
+            CleanProfileRow(
+                icon = Icons.Outlined.DownloadForOffline,
+                title = tr("Yuklanmalar", "Downloads", "Загрузки"),
+                trailingText = "${OfflineDownloadManager.downloadedAnimes.size} ${tr("ta", "items", "шт.")}",
+                onClick = onNavigateToDownloads
+            )
         }
 
         Spacer(modifier = Modifier.height(22.dp))
@@ -478,7 +491,7 @@ fun ProfileScreen(
                         isCheckingUpdate = true
                         scope.launch {
                             try {
-                                val res = DarkmoraApi.checkUpdate()
+                                val res = DarkmoraApi.checkUpdate(sessionManager.getToken())
                                 if (res.ok && res.data != null) {
                                     if (res.data.versionCode > BuildConfig.VERSION_CODE) {
                                         updateInfo = res.data
