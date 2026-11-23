@@ -26,8 +26,12 @@ jobs:
           gradle-version: '8.9'
 
       - name: Decode Release Keystore
-        if: ${{ secrets.DARKMORA_RELEASE_KEYSTORE_B64 != '' }}
-        run: echo "${{ secrets.DARKMORA_RELEASE_KEYSTORE_B64 }}" | base64 -d > app/darkmora-release.jks
+        env:
+          KS_B64: ${{ secrets.DARKMORA_RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > app/darkmora-release.jks
+          fi
 
       - name: Build Release APK
         env:
