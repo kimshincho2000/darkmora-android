@@ -3,6 +3,8 @@ package uz.darkmora.app.ui.screens
 import android.net.Uri
 import android.util.Base64
 import android.widget.Toast
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -15,7 +17,6 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,15 +24,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -49,6 +57,9 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 @Composable
 fun AnimeDetailScreen(
@@ -67,9 +78,10 @@ fun AnimeDetailScreen(
     var showAuthDialog by remember { mutableStateOf(false) }
     var pendingEpisodeToPlay by remember { mutableStateOf<Pair<Anime, Episode>?>(null) }
 
-    // Panel tabs: 0 = Qismlar, 1 = Izohlar
+    // Minimal panel state: 0 = Qismlar, 1 = Izohlar
     var selectedTab by remember { mutableIntStateOf(0) }
     var isGridMode by remember { mutableStateOf(false) }
+    var deleteConfirmEp by remember { mutableStateOf<Int?>(null) }
 
     // Comments state
     var comments by remember { mutableStateOf<List<AnimeComment>>(emptyList()) }
@@ -93,7 +105,6 @@ fun AnimeDetailScreen(
                     episodes = res.data.episodes ?: emptyList()
                     if (anime != null) {
                         isFavorite = sessionManager.isFavorite(anime!!.id)
-                        // Fetch comments in background
                         isLoadingComments = true
                         try {
                             val cRes = DarkmoraApi.getComments(anime!!.id, 60)
@@ -115,7 +126,6 @@ fun AnimeDetailScreen(
     }
 
     fun openEpisodePlayer(a: Anime, ep: Episode) {
-        // If already downloaded locally, play directly from local file (instant + offline!)
         val localEp = OfflineDownloadManager.getDownloadedEpisode(a.getEffectiveSlug(), ep.qism)
         val localFile = localEp?.filePath?.let { File(it) }
         val rawUrl = if (localFile != null && localFile.exists() && localFile.length() > 0L) {
@@ -165,15 +175,7 @@ fun AnimeDetailScreen(
             return
         }
         if (OfflineDownloadManager.isDownloaded(effectiveSlug, ep.qism)) {
-            Toast.makeText(
-                context,
-                tr(
-                    "Yuklangan! Sozlamalar → Yuklanmalar bo'limida ham mavjud",
-                    "Downloaded! Also available in Preferences → Downloads",
-                    "Скачано! Доступно в Настройки → Загрузки"
-                ),
-                Toast.LENGTH_SHORT
-            ).show()
+            deleteConfirmEp = ep.qism
             return
         }
         if (!sessionManager.isLoggedIn()) {
@@ -189,12 +191,7 @@ fun AnimeDetailScreen(
             ).show()
             return
         }
-        Toast.makeText(
-            context,
-            tr("${ep.qism}-qism yuklanmoqda...", "Downloading episode ${ep.qism}...", "Загрузка ${ep.qism} серии..."),
-            Toast.LENGTH_SHORT
-        ).show()
-        OfflineDownloadManager.startDownload(context, a, ep) { ok, msg ->
+        OfflineDownloadManager.startDownload(context, a, ep) { _, msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
         }
     }
@@ -223,11 +220,6 @@ fun AnimeDetailScreen(
                 if (res.ok && res.data != null) {
                     comments = listOf(res.data) + comments
                     commentDraft = ""
-                    Toast.makeText(
-                        context,
-                        tr("Izohingiz qo'shildi", "Comment posted", "Комментарий добавлен"),
-                        Toast.LENGTH_SHORT
-                    ).show()
                 } else {
                     Toast.makeText(
                         context,
@@ -467,7 +459,7 @@ fun AnimeDetailScreen(
                 }
 
                 // ============================================================
-                // 2. DESCRIPTION + PRIMARY PLAY BUTTON + REDESIGNED PANEL TABS
+                // 2. DESCRIPTION + PLAY BUTTON + MINIMAL TAB BAR
                 // ============================================================
                 item {
                     Column(
@@ -524,140 +516,78 @@ fun AnimeDetailScreen(
 
                         Spacer(modifier = Modifier.height(22.dp))
 
-                        // Modern Segmented Tab Switcher: Qismlar | Izohlar
+                        // Ultra-Clean Minimalist Header Bar: [Qismlar]  [Izohlar]      [List/Grid]
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(BgCard)
-                                .border(0.9.dp, CardBorder, RoundedCornerShape(18.dp))
-                                .padding(5.dp),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            DetailPanelTab(
-                                modifier = Modifier.weight(1f),
-                                selected = selectedTab == 0,
-                                icon = Icons.Default.PlaylistPlay,
-                                label = tr("Qismlar", "Episodes", "Серии"),
-                                count = episodes.size,
-                                onClick = { selectedTab = 0 }
-                            )
-                            DetailPanelTab(
-                                modifier = Modifier.weight(1f),
-                                selected = selectedTab == 1,
-                                icon = Icons.Outlined.ChatBubbleOutline,
-                                label = tr("Izohlar", "Comments", "Комменты"),
-                                count = comments.size,
-                                onClick = { selectedTab = 1 }
-                            )
-                        }
-
-                        if (selectedTab == 0) {
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // Episodes Panel Toolbar (Title + Offline count + List/Grid toggle)
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column {
-                                    Text(
-                                        text = tr("Qismni tanlang", "Select Episode", "Выберите серию"),
-                                        color = TextPrimary,
-                                        fontSize = 16.5.sp,
-                                        fontWeight = FontWeight.ExtraBold
-                                    )
-                                    val subInfo = buildString {
-                                        if (lastWatchedEp > 0) {
-                                            append("${tr("Oxirgi", "Last", "Посл.")}: $lastWatchedEp-${tr("qism", "ep", "сер.")}")
-                                        }
-                                        if (downloadedForThisAnime.isNotEmpty()) {
-                                            if (isNotEmpty()) append(" • ")
-                                            append("${downloadedForThisAnime.size} ${tr("ta yuklangan", "downloaded", "скачано")}")
-                                        }
-                                    }
-                                    if (subInfo.isNotEmpty()) {
-                                        Text(
-                                            text = subInfo,
-                                            color = if (downloadedForThisAnime.isNotEmpty()) GreenOnline else PrimaryBlue,
-                                            fontSize = 11.5.sp,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-
-                                // List / Grid View Toggle Pill
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(BgCard)
-                                        .border(0.8.dp, CardBorder, RoundedCornerShape(12.dp))
-                                        .padding(3.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .bounceClick { isGridMode = false }
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(if (!isGridMode) PrimaryBlue else Color.Transparent),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.ViewAgenda,
-                                            contentDescription = "List",
-                                            tint = if (!isGridMode) Color.White else TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(32.dp)
-                                            .bounceClick { isGridMode = true }
-                                            .clip(RoundedCornerShape(9.dp))
-                                            .background(if (isGridMode) PrimaryBlue else Color.Transparent),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.GridView,
-                                            contentDescription = "Grid",
-                                            tint = if (isGridMode) Color.White else TextMuted,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
+                                MinimalPillTab(
+                                    selected = selectedTab == 0,
+                                    label = tr("Qismlar", "Episodes", "Серии"),
+                                    count = episodes.size,
+                                    onClick = { selectedTab = 0 }
+                                )
+                                MinimalPillTab(
+                                    selected = selectedTab == 1,
+                                    label = tr("Izohlar", "Comments", "Отзывы"),
+                                    count = comments.size,
+                                    onClick = { selectedTab = 1 }
+                                )
                             }
 
-                            if (chunks.size > 1) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            if (selectedTab == 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .bounceClick { isGridMode = !isGridMode }
+                                        .clip(CircleShape)
+                                        .background(BgCard)
+                                        .border(0.8.dp, CardBorder, CircleShape),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    items(chunks.indices.toList()) { idx ->
-                                        val c = chunks[idx]
-                                        val firstNum = c.first().qism
-                                        val lastNum = c.last().qism
-                                        val isSelected = selectedChunkIndex == idx
-                                        Box(
-                                            modifier = Modifier
-                                                .bounceClick { selectedChunkIndex = idx }
-                                                .clip(RoundedCornerShape(50))
-                                                .background(if (isSelected) PrimaryBlue else BgCard)
-                                                .border(
-                                                    width = 0.8.dp,
-                                                    color = if (isSelected) PrimaryBlue else CardBorder,
-                                                    shape = RoundedCornerShape(50)
-                                                )
-                                                .padding(horizontal = 16.dp, vertical = 7.dp)
-                                        ) {
-                                            Text(
-                                                text = "$firstNum - $lastNum",
-                                                color = if (isSelected) Color.White else TextMuted,
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Bold
+                                    Icon(
+                                        imageVector = if (isGridMode) Icons.Default.ViewAgenda else Icons.Default.GridView,
+                                        contentDescription = "Toggle Layout",
+                                        tint = TextPrimary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (selectedTab == 0 && chunks.size > 1) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                items(chunks.indices.toList()) { idx ->
+                                    val c = chunks[idx]
+                                    val firstNum = c.first().qism
+                                    val lastNum = c.last().qism
+                                    val isSelected = selectedChunkIndex == idx
+                                    Box(
+                                        modifier = Modifier
+                                            .bounceClick { selectedChunkIndex = idx }
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (isSelected) TextPrimary else BgCard)
+                                            .border(
+                                                width = 0.8.dp,
+                                                color = if (isSelected) TextPrimary else CardBorder,
+                                                shape = RoundedCornerShape(50)
                                             )
-                                        }
+                                            .padding(horizontal = 14.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = "$firstNum – $lastNum",
+                                            color = if (isSelected) BgSurface else TextMuted,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
                                 }
                             }
@@ -666,7 +596,7 @@ fun AnimeDetailScreen(
                 }
 
                 // ============================================================
-                // 3A. EPISODES TAB CONTENT (STYLISH LIST OR COMPACT 3-COL GRID)
+                // 3A. EPISODES TAB — MINIMALIST DARKMORA LIST OR GRID
                 // ============================================================
                 if (selectedTab == 0) {
                     if (!isGridMode) {
@@ -676,32 +606,23 @@ fun AnimeDetailScreen(
                             val isDownloaded = downloadedEp != null
                             val activeDl = OfflineDownloadManager.activeDownloads[OfflineDownloadManager.keyOf(effectiveSlug, ep.qism)]
 
-                            Box(
+                            Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 5.dp)
+                                    .padding(horizontal = 18.dp, vertical = 4.dp)
                                     .bounceClick { launchEpisode(a, ep) }
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(
-                                        when {
-                                            isLastWatched -> PrimaryBlue.copy(alpha = 0.14f)
-                                            isDownloaded -> GreenOnline.copy(alpha = 0.08f)
-                                            else -> BgCard
-                                        }
-                                    )
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(if (isLastWatched) PrimaryBlue.copy(alpha = 0.10f) else BgCard)
                                     .border(
-                                        width = 0.9.dp,
-                                        color = when {
-                                            isLastWatched -> PrimaryBlue.copy(alpha = 0.50f)
-                                            isDownloaded -> GreenOnline.copy(alpha = 0.35f)
-                                            else -> CardBorder
-                                        },
-                                        shape = RoundedCornerShape(20.dp)
+                                        width = 0.8.dp,
+                                        color = if (isLastWatched) PrimaryBlue.copy(alpha = 0.40f) else CardBorder,
+                                        shape = RoundedCornerShape(16.dp)
                                     )
-                                    .padding(horizontal = 14.dp, vertical = 12.dp)
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 12.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -710,103 +631,82 @@ fun AnimeDetailScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
-                                        // Stylized Episode Number Tile
+                                        // Minimalist Episode Circle
                                         Box(
                                             modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(
-                                                    when {
-                                                        isLastWatched -> PrimaryBlue
-                                                        isDownloaded -> GreenOnline.copy(alpha = 0.16f)
-                                                        else -> BgSurface
-                                                    }
-                                                )
-                                                .border(
-                                                    0.8.dp,
-                                                    when {
-                                                        isLastWatched -> PrimaryBlue
-                                                        isDownloaded -> GreenOnline.copy(alpha = 0.45f)
-                                                        else -> CardBorder
-                                                    },
-                                                    RoundedCornerShape(14.dp)
-                                                ),
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .background(if (isLastWatched) TextPrimary else BgSurface)
+                                                .border(0.7.dp, if (isLastWatched) TextPrimary else CardBorder, CircleShape),
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            Text(
-                                                text = ep.qism.toString().padStart(2, '0'),
-                                                color = when {
-                                                    isLastWatched -> Color.White
-                                                    isDownloaded -> GreenOnline
-                                                    else -> TextPrimary
-                                                },
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.ExtraBold
-                                            )
+                                            if (isLastWatched) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PlayArrow,
+                                                    contentDescription = null,
+                                                    tint = BgSurface,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = ep.qism.toString().padStart(2, '0'),
+                                                    color = TextPrimary,
+                                                    fontSize = 12.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
 
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = "${ep.qism}-${tr("qism", "episode", "серия")}",
-                                                    color = TextPrimary,
-                                                    fontSize = 14.5.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                                if (isLastWatched) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(6.dp))
-                                                            .background(PrimaryBlue.copy(alpha = 0.2f))
-                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = tr("Oxirgi", "Last", "Посл."),
-                                                            color = PrimaryBlue,
-                                                            fontSize = 9.5.sp,
-                                                            fontWeight = FontWeight.Bold
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Spacer(modifier = Modifier.height(2.dp))
-
+                                            Text(
+                                                text = "${ep.qism}-${tr("qism", "episode", "серия")}",
+                                                color = TextPrimary,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Spacer(modifier = Modifier.height(1.dp))
                                             when {
                                                 activeDl != null -> {
                                                     val pct = (activeDl.progress * 100).toInt()
-                                                    val sizeTxt = if (activeDl.totalBytes > 0L) {
-                                                        "${OfflineDownloadManager.formatFileSize(activeDl.downloadedBytes)} / ${OfflineDownloadManager.formatFileSize(activeDl.totalBytes)}"
-                                                    } else {
-                                                        OfflineDownloadManager.formatFileSize(activeDl.downloadedBytes)
-                                                    }
                                                     Text(
-                                                        text = "${tr("Yuklanmoqda", "Downloading", "Загрузка")} $pct% • $sizeTxt",
-                                                        color = PrimaryBlue,
-                                                        fontSize = 11.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
+                                                        text = "${tr("Yuklanmoqda", "Downloading", "Загрузка")} • $pct%",
+                                                        color = RatingGold,
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.Medium
                                                     )
                                                 }
                                                 isDownloaded -> {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(6.dp)
+                                                                .clip(CircleShape)
+                                                                .background(GreenOnline)
+                                                        )
+                                                        Text(
+                                                            text = "${tr("Oflayn", "Offline", "Офлайн")} • ${OfflineDownloadManager.formatFileSize(downloadedEp!!.sizeBytes)}",
+                                                            color = TextMuted,
+                                                            fontSize = 11.5.sp,
+                                                            fontWeight = FontWeight.Medium
+                                                        )
+                                                    }
+                                                }
+                                                isLastWatched -> {
                                                     Text(
-                                                        text = "${tr("Oflayn tayyor", "Saved offline", "Доступно офлайн")} • ${OfflineDownloadManager.formatFileSize(downloadedEp!!.sizeBytes)}",
-                                                        color = GreenOnline,
+                                                        text = tr("Oxirgi ko'rilgan", "Last watched", "Последний просмотр"),
+                                                        color = PrimaryBlue,
                                                         fontSize = 11.5.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
+                                                        fontWeight = FontWeight.Medium
                                                     )
                                                 }
                                                 else -> {
                                                     Text(
                                                         text = a.displayTitle(),
                                                         color = TextDim,
-                                                        fontSize = 11.5.sp,
+                                                        fontSize = 11.sp,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
@@ -815,127 +715,70 @@ fun AnimeDetailScreen(
                                         }
                                     }
 
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    // Single Clean Download Action (Petal Vortex while downloading!)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .bounceClick { handleDownloadClick(a, ep) }
+                                            .clip(CircleShape),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        // Download / Progress / Downloaded Button
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .bounceClick { handleDownloadClick(a, ep) }
-                                                .clip(CircleShape)
-                                                .background(
-                                                    when {
-                                                        activeDl != null -> PrimaryBlue.copy(alpha = 0.14f)
-                                                        isDownloaded -> GreenOnline.copy(alpha = 0.16f)
-                                                        else -> BgSurface
-                                                    }
-                                                )
-                                                .border(
-                                                    0.8.dp,
-                                                    when {
-                                                        activeDl != null -> PrimaryBlue.copy(alpha = 0.4f)
-                                                        isDownloaded -> GreenOnline.copy(alpha = 0.45f)
-                                                        else -> CardBorder
-                                                    },
-                                                    CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            when {
-                                                activeDl != null -> {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        CircularProgressIndicator(
-                                                            progress = { activeDl.progress.coerceIn(0.05f, 1f) },
-                                                            modifier = Modifier.size(28.dp),
-                                                            color = PrimaryBlue,
-                                                            trackColor = CardBorder,
-                                                            strokeWidth = 2.5.dp
-                                                        )
-                                                        Icon(
-                                                            imageVector = Icons.Default.Close,
-                                                            contentDescription = "Cancel",
-                                                            tint = PrimaryBlue,
-                                                            modifier = Modifier.size(13.dp)
-                                                        )
-                                                    }
-                                                }
-                                                isDownloaded -> {
-                                                    Icon(
-                                                        imageVector = Icons.Default.OfflinePin,
-                                                        contentDescription = "Downloaded",
-                                                        tint = GreenOnline,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
-                                                else -> {
-                                                    Icon(
-                                                        imageVector = Icons.Outlined.DownloadForOffline,
-                                                        contentDescription = tr("Yuklab olish", "Download", "Скачать"),
-                                                        tint = TextMuted,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                }
+                                        when {
+                                            activeDl != null -> {
+                                                PetalVortexLoader(size = 38.dp)
                                             }
-                                        }
-
-                                        // Delete button if already downloaded
-                                        if (isDownloaded) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(34.dp)
-                                                    .bounceClick {
-                                                        OfflineDownloadManager.deleteEpisode(context, effectiveSlug, ep.qism)
-                                                        Toast.makeText(
-                                                            context,
-                                                            tr("${ep.qism}-qism yuklanmalardan o'chirildi", "Episode ${ep.qism} removed", "${ep.qism} серия удалена"),
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    }
-                                                    .clip(CircleShape)
-                                                    .background(RedBadge.copy(alpha = 0.12f)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
+                                            isDownloaded -> {
                                                 Icon(
-                                                    imageVector = Icons.Outlined.DeleteOutline,
-                                                    contentDescription = "Delete",
-                                                    tint = RedBadge,
-                                                    modifier = Modifier.size(16.dp)
+                                                    imageVector = Icons.Default.CheckCircle,
+                                                    contentDescription = "Offline",
+                                                    tint = GreenOnline,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                            else -> {
+                                                Icon(
+                                                    imageVector = Icons.Outlined.DownloadForOffline,
+                                                    contentDescription = tr("Yuklab olish", "Download", "Скачать"),
+                                                    tint = TextMuted,
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                             }
                                         }
+                                    }
+                                }
 
-                                        // Play Circle
+                                // Sleek razor-thin bottom progress line while downloading
+                                if (activeDl != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(2.dp)
+                                            .background(DividerTone)
+                                    ) {
                                         Box(
                                             modifier = Modifier
-                                                .size(36.dp)
-                                                .clip(CircleShape)
-                                                .background(if (isLastWatched) PrimaryBlue else BgSurface)
-                                                .border(0.7.dp, if (isLastWatched) PrimaryBlue else CardBorder, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = null,
-                                                tint = if (isLastWatched) Color.White else TextPrimary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
+                                                .fillMaxWidth(activeDl.progress.coerceIn(0.03f, 1f))
+                                                .fillMaxHeight()
+                                                .background(
+                                                    Brush.horizontalGradient(
+                                                        listOf(RatingGold, TextPrimary)
+                                                    )
+                                                )
+                                        )
                                     }
                                 }
                             }
                         }
                     } else {
-                        // Compact 3-Column Episode Grid
-                        val rows = visibleEpisodes.chunked(3)
+                        // Ultra-Clean 4-Column Minimalist Grid
+                        val rows = visibleEpisodes.chunked(4)
                         items(rows.indices.toList(), key = { "ep_grid_row_$it" }) { rowIdx ->
                             val rowEps = rows[rowIdx]
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 5.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    .padding(horizontal = 18.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 rowEps.forEach { ep ->
                                     val isLastWatched = ep.qism == lastWatchedEp
@@ -945,101 +788,41 @@ fun AnimeDetailScreen(
                                     Box(
                                         modifier = Modifier
                                             .weight(1f)
+                                            .height(54.dp)
                                             .bounceClick { launchEpisode(a, ep) }
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(
-                                                when {
-                                                    isLastWatched -> PrimaryBlue.copy(alpha = 0.16f)
-                                                    isDownloaded -> GreenOnline.copy(alpha = 0.10f)
-                                                    else -> BgCard
-                                                }
-                                            )
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(if (isLastWatched) TextPrimary else BgCard)
                                             .border(
-                                                width = 0.9.dp,
-                                                color = when {
-                                                    isLastWatched -> PrimaryBlue
-                                                    isDownloaded -> GreenOnline.copy(alpha = 0.45f)
-                                                    else -> CardBorder
-                                                },
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
-                                            .padding(horizontal = 10.dp, vertical = 12.dp)
+                                                width = 0.8.dp,
+                                                color = if (isLastWatched) TextPrimary else CardBorder,
+                                                shape = RoundedCornerShape(14.dp)
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Column(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = "${ep.qism}-${tr("qism", "ep", "сер.")}",
-                                                    color = if (isLastWatched) PrimaryBlue else TextPrimary,
-                                                    fontSize = 13.sp,
-                                                    fontWeight = FontWeight.ExtraBold
-                                                )
-
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(26.dp)
-                                                        .bounceClick { handleDownloadClick(a, ep) }
-                                                        .clip(CircleShape)
-                                                        .background(
-                                                            when {
-                                                                isDownloaded -> GreenOnline.copy(alpha = 0.16f)
-                                                                activeDl != null -> PrimaryBlue.copy(alpha = 0.16f)
-                                                                else -> BgSurface
-                                                            }
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    when {
-                                                        activeDl != null -> CircularProgressIndicator(
-                                                            progress = { activeDl.progress.coerceIn(0.05f, 1f) },
-                                                            modifier = Modifier.size(16.dp),
-                                                            color = PrimaryBlue,
-                                                            strokeWidth = 2.dp
-                                                        )
-                                                        isDownloaded -> Icon(
-                                                            Icons.Default.OfflinePin,
-                                                            contentDescription = null,
-                                                            tint = GreenOnline,
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                        else -> Icon(
-                                                            Icons.Outlined.DownloadForOffline,
-                                                            contentDescription = null,
-                                                            tint = TextMuted,
-                                                            modifier = Modifier.size(15.dp)
-                                                        )
-                                                    }
-                                                }
-                                            }
-
+                                        if (activeDl != null) {
+                                            PetalVortexLoader(size = 34.dp)
+                                        } else {
                                             Text(
-                                                text = when {
-                                                    activeDl != null -> "${(activeDl.progress * 100).toInt()}%"
-                                                    isDownloaded -> tr("Oflayn", "Offline", "Офлайн")
-                                                    isLastWatched -> tr("Davom etish", "Resume", "Продолжить")
-                                                    else -> tr("Ko'rish", "Watch", "Смотреть")
-                                                },
-                                                color = when {
-                                                    activeDl != null -> PrimaryBlue
-                                                    isDownloaded -> GreenOnline
-                                                    isLastWatched -> PrimaryBlue
-                                                    else -> TextDim
-                                                },
-                                                fontSize = 10.5.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                modifier = Modifier.fillMaxWidth()
+                                                text = ep.qism.toString().padStart(2, '0'),
+                                                color = if (isLastWatched) BgSurface else TextPrimary,
+                                                fontSize = 14.5.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+
+                                        if (isDownloaded && activeDl == null) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(6.dp)
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(GreenOnline)
                                             )
                                         }
                                     }
                                 }
-                                repeat(3 - rowEps.size) {
+                                repeat(4 - rowEps.size) {
                                     Spacer(modifier = Modifier.weight(1f))
                                 }
                             }
@@ -1048,80 +831,69 @@ fun AnimeDetailScreen(
                 }
 
                 // ============================================================
-                // 3B. COMMENTS TAB CONTENT (COMPOSER + REAL-TIME COMMENTS LIST)
+                // 3B. COMMENTS TAB — CLEAN MINIMALIST COMPOSER + GROUPED LIST
                 // ============================================================
                 if (selectedTab == 1) {
                     item {
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 18.dp)
+                                .padding(horizontal = 18.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(BgCard)
+                                .border(0.8.dp, CardBorder, RoundedCornerShape(24.dp))
+                                .padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Comment Input Card
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(BgCard)
-                                    .border(0.9.dp, CardBorder, RoundedCornerShape(20.dp))
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Box(modifier = Modifier.weight(1f)) {
-                                    if (commentDraft.isEmpty()) {
-                                        Text(
-                                            text = tr(
-                                                "Anime haqida fikringizni yozing...",
-                                                "Write your thoughts about this anime...",
-                                                "Напишите комментарий об аниме..."
-                                            ),
-                                            color = TextDim,
-                                            fontSize = 13.5.sp
-                                        )
-                                    }
-                                    BasicTextField(
-                                        value = commentDraft,
-                                        onValueChange = { if (it.length <= 500) commentDraft = it },
-                                        textStyle = TextStyle(
-                                            color = TextPrimary,
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp
-                                        ),
-                                        cursorBrush = SolidColor(PrimaryBlue),
-                                        maxLines = 4,
-                                        modifier = Modifier.fillMaxWidth()
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (commentDraft.isEmpty()) {
+                                    Text(
+                                        text = tr("Izoh yozing...", "Write a comment...", "Напишите отзыв..."),
+                                        color = TextDim,
+                                        fontSize = 13.5.sp
                                     )
                                 }
-
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .bounceClick { submitComment(a) }
-                                        .clip(CircleShape)
-                                        .background(if (commentDraft.isNotBlank()) PrimaryBlue else BgSurface)
-                                        .border(0.8.dp, if (commentDraft.isNotBlank()) PrimaryBlue else CardBorder, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isSendingComment) {
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            color = Color.White,
-                                            strokeWidth = 2.dp
-                                        )
-                                    } else {
-                                        Icon(
-                                            imageVector = Icons.Default.Send,
-                                            contentDescription = tr("Yuborish", "Send", "Отправить"),
-                                            tint = if (commentDraft.isNotBlank()) Color.White else TextMuted,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
+                                BasicTextField(
+                                    value = commentDraft,
+                                    onValueChange = { if (it.length <= 500) commentDraft = it },
+                                    textStyle = TextStyle(
+                                        color = TextPrimary,
+                                        fontSize = 13.5.sp,
+                                        lineHeight = 19.sp
+                                    ),
+                                    cursorBrush = SolidColor(TextPrimary),
+                                    maxLines = 4,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
                             }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .bounceClick { submitComment(a) }
+                                    .clip(CircleShape)
+                                    .background(if (commentDraft.isNotBlank()) TextPrimary else BgSurface),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSendingComment) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(16.dp),
+                                        color = BgSurface,
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.ArrowUpward,
+                                        contentDescription = tr("Yuborish", "Send", "Отправить"),
+                                        tint = if (commentDraft.isNotBlank()) BgSurface else TextDim,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                         }
+
+                        Spacer(modifier = Modifier.height(14.dp))
                     }
 
                     if (isLoadingComments) {
@@ -1130,8 +902,8 @@ fun AnimeDetailScreen(
                                 modifier = Modifier.padding(horizontal = 18.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                ShimmerBox(modifier = Modifier.fillMaxWidth().height(72.dp), cornerRadius = 16.dp)
-                                ShimmerBox(modifier = Modifier.fillMaxWidth().height(72.dp), cornerRadius = 16.dp)
+                                ShimmerBox(modifier = Modifier.fillMaxWidth().height(64.dp), cornerRadius = 16.dp)
+                                ShimmerBox(modifier = Modifier.fillMaxWidth().height(64.dp), cornerRadius = 16.dp)
                             }
                         }
                     } else if (comments.isEmpty()) {
@@ -1139,45 +911,59 @@ fun AnimeDetailScreen(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 18.dp, vertical = 20.dp)
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .padding(horizontal = 18.dp, vertical = 12.dp)
+                                    .clip(RoundedCornerShape(18.dp))
                                     .background(BgCard)
-                                    .border(0.8.dp, CardBorder, RoundedCornerShape(20.dp))
-                                    .padding(vertical = 28.dp, horizontal = 20.dp),
+                                    .border(0.8.dp, CardBorder, RoundedCornerShape(18.dp))
+                                    .padding(vertical = 26.dp, horizontal = 20.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(
                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Outlined.ChatBubbleOutline,
                                         contentDescription = null,
                                         tint = TextDim,
-                                        modifier = Modifier.size(32.dp)
+                                        modifier = Modifier.size(26.dp)
                                     )
                                     Text(
                                         text = tr("Hozircha izohlar yo'q", "No comments yet", "Комментариев пока нет"),
                                         color = TextPrimary,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        text = tr(
-                                            "Birinchi bo'lib fikr bildiring!",
-                                            "Be the first to share your thoughts!",
-                                            "Будьте первым, кто оставит отзыв!"
-                                        ),
-                                        color = TextMuted,
-                                        fontSize = 12.5.sp,
+                                        text = tr("Birinchi bo'lib fikr bildiring", "Be the first to share your thoughts", "Оставьте первый отзыв"),
+                                        color = TextDim,
+                                        fontSize = 12.sp,
                                         textAlign = TextAlign.Center
                                     )
                                 }
                             }
                         }
                     } else {
-                        items(comments, key = { "comment_${it.id}_${it.createdAt}" }) { c ->
-                            CommentCard(comment = c)
+                        item {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 18.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(BgCard)
+                                    .border(0.8.dp, CardBorder, RoundedCornerShape(20.dp))
+                            ) {
+                                comments.forEachIndexed { idx, c ->
+                                    MinimalCommentRow(comment = c)
+                                    if (idx < comments.lastIndex) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(horizontal = 16.dp),
+                                            thickness = 0.6.dp,
+                                            color = DividerTone
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1199,133 +985,256 @@ fun AnimeDetailScreen(
                 }
             )
         }
-    }
-}
 
-@Composable
-private fun DetailPanelTab(
-    modifier: Modifier = Modifier,
-    selected: Boolean,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    count: Int,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = modifier
-            .bounceClick(onClick = onClick)
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) PrimaryBlue else Color.Transparent)
-            .padding(vertical = 11.dp, horizontal = 10.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (selected) Color.White else TextMuted,
-            modifier = Modifier.size(18.dp)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = label,
-            color = if (selected) Color.White else TextMuted,
-            fontSize = 13.5.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(if (selected) Color.White.copy(alpha = 0.22f) else BgSurface)
-                .padding(horizontal = 7.dp, vertical = 2.dp)
-        ) {
-            Text(
-                text = count.toString(),
-                color = if (selected) Color.White else TextDim,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.ExtraBold
+        if (deleteConfirmEp != null && anime != null) {
+            val qismToDelete = deleteConfirmEp!!
+            val effectiveSlug = anime!!.getEffectiveSlug()
+            AlertDialog(
+                onDismissRequest = { deleteConfirmEp = null },
+                containerColor = BgSurface,
+                title = {
+                    Text(
+                        text = tr("Yuklangan qism", "Downloaded Episode", "Скачанная серия"),
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = tr(
+                            "$qismToDelete-qism oflayn xotirada saqlangan. Uni o'chirmoqchimisiz?",
+                            "Episode $qismToDelete is saved offline. Remove it from device?",
+                            "$qismToDelete серия сохранена офлайн. Удалить с устройства?"
+                        ),
+                        color = TextMuted
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            OfflineDownloadManager.deleteEpisode(context, effectiveSlug, qismToDelete)
+                            deleteConfirmEp = null
+                            Toast.makeText(
+                                context,
+                                tr("$qismToDelete-qism o'chirildi", "Episode $qismToDelete deleted", "$qismToDelete серия удалена"),
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    ) {
+                        Text(tr("O'chirish", "Delete", "Удалить"), color = RedBadge, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deleteConfirmEp = null }) {
+                        Text(tr("Yopish", "Close", "Закрыть"), color = TextMuted)
+                    }
+                }
             )
         }
     }
 }
 
+/**
+ * Custom 60fps Petal-Arc Vortex Download Progress Animation
+ * Modeled after the luminous 6-petal rotating + breathing crescent-arc animation.
+ */
 @Composable
-private fun CommentCard(comment: AnimeComment) {
-    Box(
+fun PetalVortexLoader(
+    modifier: Modifier = Modifier,
+    size: Dp = 36.dp
+) {
+    val petalBase = TextPrimary
+    val petalGold = RatingGold
+
+    val infiniteTransition = rememberInfiniteTransition(label = "petal_vortex")
+
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "vortex_rot"
+    )
+
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1100, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "vortex_pulse"
+    )
+
+    val arcWave by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "vortex_arc"
+    )
+
+    Canvas(modifier = modifier.size(size)) {
+        val cx = this.size.width / 2f
+        val cy = this.size.height / 2f
+        val maxR = this.size.minDimension / 2f
+        val count = 6
+
+        // 1. Outer sweeping golden crescent trails radiating outward
+        val arcRadius = maxR * (0.44f + 0.48f * arcWave)
+        val arcAlpha = (sin(arcWave * PI).toFloat()).coerceIn(0f, 1f) * 0.85f
+        val strokeW = (maxR * 0.085f).coerceAtLeast(1.2f)
+
+        for (i in 0 until count) {
+            val baseAngle = rotation * 0.85f + i * 60f + arcWave * 38f
+            val sweep = 36f - 12f * arcWave
+            drawArc(
+                color = petalGold.copy(alpha = arcAlpha),
+                startAngle = baseAngle,
+                sweepAngle = sweep,
+                useCenter = false,
+                topLeft = Offset(cx - arcRadius, cy - arcRadius),
+                size = Size(arcRadius * 2f, arcRadius * 2f),
+                style = Stroke(width = strokeW, cap = StrokeCap.Round)
+            )
+        }
+
+        // 2. Inner 6 orbiting & breathing luminous petals (alternating white & gold)
+        val petalOrbit = maxR * (0.24f + 0.12f * pulse)
+        val petalW = maxR * 0.24f
+        val petalH = maxR * 0.13f
+
+        for (i in 0 until count) {
+            val angleDeg = rotation + i * 60f
+            val rad = angleDeg * (PI / 180.0)
+            val px = cx + (cos(rad) * petalOrbit).toFloat()
+            val py = cy + (sin(rad) * petalOrbit).toFloat()
+
+            // Smooth gold highlight travelling around the 6 petals
+            val highlightPhase = ((rotation / 60f) + i) % 6f
+            val goldFactor = if (highlightPhase < 1.5f) {
+                (1f - highlightPhase / 1.5f).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val color = lerp(petalBase, petalGold, goldFactor)
+            val scale = 1f + 0.18f * goldFactor
+
+            rotate(degrees = angleDeg + 22f, pivot = Offset(px, py)) {
+                drawOval(
+                    color = color,
+                    topLeft = Offset(px - (petalW * scale) / 2f, py - (petalH * scale) / 2f),
+                    size = Size(petalW * scale, petalH * scale)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MinimalPillTab(
+    selected: Boolean,
+    label: String,
+    count: Int,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .bounceClick(onClick = onClick)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) TextPrimary else BgCard)
+            .border(0.8.dp, if (selected) TextPrimary else CardBorder, RoundedCornerShape(50))
+            .padding(horizontal = 15.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (selected) BgSurface else TextMuted,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = count.toString(),
+            color = if (selected) BgSurface.copy(alpha = 0.72f) else TextDim,
+            fontSize = 11.5.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun MinimalCommentRow(comment: AnimeComment) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 18.dp, vertical = 5.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(BgCard)
-            .border(0.8.dp, CardBorder, RoundedCornerShape(18.dp))
-            .padding(14.dp)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            if (!comment.photoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = comment.photoUrl,
-                    contentDescription = comment.username,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(BgSurface)
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(PrimaryBlue.copy(alpha = 0.18f))
-                        .border(0.8.dp, PrimaryBlue.copy(alpha = 0.4f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = comment.username.firstOrNull()?.uppercase() ?: "U",
-                        color = PrimaryBlue,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.ExtraBold
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+        if (!comment.photoUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = comment.photoUrl,
+                contentDescription = comment.username,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(BgSurface)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(BgSurface)
+                    .border(0.8.dp, CardBorder, CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = comment.username,
-                        color = TextPrimary,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = formatRelativeTime(comment.createdAt),
-                        color = TextDim,
-                        fontSize = 11.sp
-                    )
-                }
-
                 Text(
-                    text = comment.text,
-                    color = TextMuted,
+                    text = comment.username.firstOrNull()?.uppercase() ?: "U",
+                    color = TextPrimary,
                     fontSize = 13.sp,
-                    lineHeight = 19.sp
+                    fontWeight = FontWeight.Bold
                 )
             }
+        }
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = comment.username,
+                    color = TextPrimary,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = formatRelativeTime(comment.createdAt),
+                    color = TextDim,
+                    fontSize = 11.sp
+                )
+            }
+
+            Text(
+                text = comment.text,
+                color = TextMuted,
+                fontSize = 13.sp,
+                lineHeight = 19.sp
+            )
         }
     }
 }
