@@ -11,7 +11,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 data class DownloadedEpisode(
@@ -47,7 +46,17 @@ data class ActiveDownloadState(
     val qism: Int,
     val progress: Float = 0f,
     val downloadedBytes: Long = 0L,
-    val totalBytes: Long = -1L
+    val totalBytes: Long = -1L,
+    val isQueued: Boolean = false
+)
+
+private data class QueuedDownloadTask(
+    val key: String,
+    val appCtx: Context,
+    val anime: Anime,
+    val episode: Episode,
+    val url: String,
+    val onResult: (Boolean, String) -> Unit
 )
 
 object OfflineDownloadManager {
@@ -63,7 +72,11 @@ object OfflineDownloadManager {
         .followSslRedirects(true)
         .build()
 
-    private val activeJobs = ConcurrentHashMap<String, Job>()
+    // Strict FIFO serial download queue (1 active download at a time)
+    private val queueLock = Any()
+    private val pendingQueue = ArrayDeque<QueuedDownloadTask>()
+    private var currentRunningKey: String? = null
+    private var currentJob: Job? = null
     private var initialized = false
 
     // Compose-observable states so UI updates live everywhere
@@ -101,7 +114,6 @@ object OfflineDownloadManager {
             emptyList()
         }
 
-        // Keep only episodes whose files still exist on disk
         val cleaned = loaded.mapNotNull { anime ->
             val validEps = anime.episodes
                 .filter { ep ->
@@ -150,7 +162,6 @@ object OfflineDownloadManager {
 
         val slug = anime.getEffectiveSlug()
         val k = keyOf(slug, episode.qism)
-        if (activeJobs.containsKey(k)) return
 
         val url = (episode.videoUrl ?: episode.embedUrl ?: "").trim()
         if (url.isBlank() || (!url.startsWith("http://") && !url.startsWith("https://"))) {
@@ -160,19 +171,63 @@ object OfflineDownloadManager {
             return
         }
 
-        scope.launch(Dispatchers.Main) {
-            activeDownloads[k] = ActiveDownloadState(slug = slug, qism = episode.qism, progress = 0f)
+        val shouldStartImmediately: Boolean
+        synchronized(queueLock) {
+            if (currentRunningKey == k || pendingQueue.any { it.key == k }) {
+                return
+            }
+            val task = QueuedDownloadTask(
+                key = k,
+                appCtx = appCtx,
+                anime = anime,
+                episode = episode,
+                url = url,
+                onResult = onResult
+            )
+            if (currentJob == null) {
+                currentRunningKey = k
+                shouldStartImmediately = true
+                launchTaskLocked(task)
+            } else {
+                pendingQueue.addLast(task)
+                shouldStartImmediately = false
+            }
         }
 
-        val job = scope.launch {
-            val animeDir = File(baseDir(appCtx), safeDirName(slug)).apply { mkdirs() }
-            val targetFile = File(animeDir, "ep_${episode.qism}.mp4")
-            val partFile = File(animeDir, "ep_${episode.qism}.mp4.part")
+        if (!shouldStartImmediately) {
+            scope.launch(Dispatchers.Main) {
+                activeDownloads[k] = ActiveDownloadState(
+                    slug = slug,
+                    qism = episode.qism,
+                    progress = 0f,
+                    isQueued = true
+                )
+            }
+        }
+    }
+
+    private fun launchTaskLocked(task: QueuedDownloadTask) {
+        val slug = task.anime.getEffectiveSlug()
+        val k = task.key
+
+        scope.launch(Dispatchers.Main) {
+            activeDownloads[k] = ActiveDownloadState(
+                slug = slug,
+                qism = task.episode.qism,
+                progress = 0f,
+                isQueued = false
+            )
+        }
+
+        currentJob = scope.launch {
+            val animeDir = File(baseDir(task.appCtx), safeDirName(slug)).apply { mkdirs() }
+            val targetFile = File(animeDir, "ep_${task.episode.qism}.mp4")
+            val partFile = File(animeDir, "ep_${task.episode.qism}.mp4.part")
             val posterFile = File(animeDir, "poster.jpg")
 
             try {
                 // Download poster locally once so offline downloads screen works 100% without internet
-                val posterUrl = anime.displayPoster()
+                val posterUrl = task.anime.displayPoster()
                 if (posterUrl.startsWith("http") && (!posterFile.exists() || posterFile.length() == 0L)) {
                     try {
                         val pReq = Request.Builder()
@@ -192,7 +247,7 @@ object OfflineDownloadManager {
                 }
 
                 val req = Request.Builder()
-                    .url(url)
+                    .url(task.url)
                     .addHeader("Referer", "https://darkmora.uz/")
                     .addHeader("Origin", "https://darkmora.uz")
                     .addHeader("User-Agent", "DarkMora-Android/1.0")
@@ -228,10 +283,11 @@ object OfflineDownloadManager {
                                     withContext(Dispatchers.Main) {
                                         activeDownloads[k] = ActiveDownloadState(
                                             slug = slug,
-                                            qism = episode.qism,
+                                            qism = task.episode.qism,
                                             progress = prog,
                                             downloadedBytes = downloadedBytes,
-                                            totalBytes = totalBytes
+                                            totalBytes = totalBytes,
+                                            isQueued = false
                                         )
                                     }
                                 }
@@ -248,8 +304,8 @@ object OfflineDownloadManager {
 
                     val finalSize = targetFile.length()
                     val newEp = DownloadedEpisode(
-                        qism = episode.qism,
-                        title = "${episode.qism}-qism",
+                        qism = task.episode.qism,
+                        title = "${task.episode.qism}-qism",
                         filePath = targetFile.absolutePath,
                         sizeBytes = finalSize,
                         downloadedAt = System.currentTimeMillis()
@@ -259,64 +315,78 @@ object OfflineDownloadManager {
                         val idx = downloadedAnimes.indexOfFirst { it.slug == slug }
                         if (idx >= 0) {
                             val existing = downloadedAnimes[idx]
-                            val mergedEps = (existing.episodes.filter { it.qism != episode.qism } + newEp)
+                            val mergedEps = (existing.episodes.filter { it.qism != task.episode.qism } + newEp)
                                 .sortedBy { it.qism }
                             downloadedAnimes[idx] = existing.copy(
-                                title = anime.displayTitle(),
+                                title = task.anime.displayTitle(),
                                 posterUrl = posterUrl,
                                 localPosterPath = if (posterFile.exists() && posterFile.length() > 0L) posterFile.absolutePath else existing.localPosterPath,
-                                year = anime.displayYear(),
-                                rating = anime.displayRating(),
-                                genres = anime.displayGenres(),
-                                description = anime.displayDescription(),
+                                year = task.anime.displayYear(),
+                                rating = task.anime.displayRating(),
+                                genres = task.anime.displayGenres(),
+                                description = task.anime.displayDescription(),
                                 episodes = mergedEps
                             )
                         } else {
                             downloadedAnimes.add(
                                 0,
                                 DownloadedAnime(
-                                    id = anime.id,
+                                    id = task.anime.id,
                                     slug = slug,
-                                    title = anime.displayTitle(),
+                                    title = task.anime.displayTitle(),
                                     posterUrl = posterUrl,
                                     localPosterPath = if (posterFile.exists() && posterFile.length() > 0L) posterFile.absolutePath else null,
-                                    year = anime.displayYear(),
-                                    rating = anime.displayRating(),
-                                    genres = anime.displayGenres(),
-                                    description = anime.displayDescription(),
+                                    year = task.anime.displayYear(),
+                                    rating = task.anime.displayRating(),
+                                    genres = task.anime.displayGenres(),
+                                    description = task.anime.displayDescription(),
                                     episodes = listOf(newEp)
                                 )
                             )
                         }
                         val snapshot = downloadedAnimes.toList()
                         activeDownloads.remove(k)
-                        scope.launch(Dispatchers.IO) { persist(appCtx, snapshot) }
-                        onResult(true, "${episode.qism}-qism yuklab olindi")
+                        scope.launch(Dispatchers.IO) { persist(task.appCtx, snapshot) }
+                        task.onResult(true, "${task.episode.qism}-qism yuklab olindi")
                     }
                 }
             } catch (ce: CancellationException) {
                 if (partFile.exists()) partFile.delete()
                 withContext(Dispatchers.Main) {
                     activeDownloads.remove(k)
-                    onResult(false, "Yuklab olish bekor qilindi")
+                    task.onResult(false, "Yuklab olish bekor qilindi")
                 }
             } catch (e: Exception) {
                 if (partFile.exists()) partFile.delete()
                 withContext(Dispatchers.Main) {
                     activeDownloads.remove(k)
-                    onResult(false, e.message ?: "Yuklab olishda xatolik")
+                    task.onResult(false, e.message ?: "Yuklab olishda xatolik")
                 }
             } finally {
-                activeJobs.remove(k)
+                synchronized(queueLock) {
+                    if (currentRunningKey == k) {
+                        currentRunningKey = null
+                        currentJob = null
+                        val next = pendingQueue.removeFirstOrNull()
+                        if (next != null) {
+                            currentRunningKey = next.key
+                            launchTaskLocked(next)
+                        }
+                    }
+                }
             }
         }
-
-        activeJobs[k] = job
     }
 
     fun cancelDownload(slug: String, qism: Int) {
         val k = keyOf(slug, qism)
-        activeJobs.remove(k)?.cancel()
+        synchronized(queueLock) {
+            if (currentRunningKey == k) {
+                currentJob?.cancel()
+            } else {
+                pendingQueue.removeAll { it.key == k }
+            }
+        }
         scope.launch(Dispatchers.Main) {
             activeDownloads.remove(k)
         }
@@ -348,10 +418,15 @@ object OfflineDownloadManager {
 
     fun deleteAnime(context: Context, slug: String) {
         val appCtx = context.applicationContext
-        // Cancel any active downloads for this anime
-        activeJobs.keys.filter { it.startsWith("${slug}_") }.forEach { k ->
-            activeJobs.remove(k)?.cancel()
-            activeDownloads.remove(k)
+        val prefix = "${slug}_"
+        synchronized(queueLock) {
+            pendingQueue.removeAll { it.key.startsWith(prefix) }
+            if (currentRunningKey?.startsWith(prefix) == true) {
+                currentJob?.cancel()
+            }
+        }
+        scope.launch(Dispatchers.Main) {
+            activeDownloads.keys.filter { it.startsWith(prefix) }.forEach { activeDownloads.remove(it) }
         }
         val idx = downloadedAnimes.indexOfFirst { it.slug == slug }
         if (idx >= 0) {

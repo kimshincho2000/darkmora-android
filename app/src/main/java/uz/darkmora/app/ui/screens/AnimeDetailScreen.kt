@@ -666,6 +666,14 @@ fun AnimeDetailScreen(
                                             )
                                             Spacer(modifier = Modifier.height(1.dp))
                                             when {
+                                                activeDl != null && activeDl.isQueued -> {
+                                                    Text(
+                                                        text = tr("Navbatda...", "Queued...", "В очереди..."),
+                                                        color = TextMuted,
+                                                        fontSize = 11.5.sp,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                }
                                                 activeDl != null -> {
                                                     val pct = (activeDl.progress * 100).toInt()
                                                     Text(
@@ -724,6 +732,14 @@ fun AnimeDetailScreen(
                                         contentAlignment = Alignment.Center
                                     ) {
                                         when {
+                                            activeDl != null && activeDl.isQueued -> {
+                                                Icon(
+                                                    imageVector = Icons.Default.Schedule,
+                                                    contentDescription = tr("Navbatda", "Queued", "В очереди"),
+                                                    tint = TextMuted,
+                                                    modifier = Modifier.size(19.dp)
+                                                )
+                                            }
                                             activeDl != null -> {
                                                 PetalVortexLoader(size = 38.dp)
                                             }
@@ -747,8 +763,8 @@ fun AnimeDetailScreen(
                                     }
                                 }
 
-                                // Sleek razor-thin bottom progress line while downloading
-                                if (activeDl != null) {
+                                // Sleek razor-thin bottom progress line while actively downloading
+                                if (activeDl != null && !activeDl.isQueued) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -799,8 +815,15 @@ fun AnimeDetailScreen(
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        if (activeDl != null) {
+                                        if (activeDl != null && !activeDl.isQueued) {
                                             PetalVortexLoader(size = 34.dp)
+                                        } else if (activeDl != null && activeDl.isQueued) {
+                                            Icon(
+                                                imageVector = Icons.Default.Schedule,
+                                                contentDescription = tr("Navbatda", "Queued", "В очереди"),
+                                                tint = TextMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         } else {
                                             Text(
                                                 text = ep.qism.toString().padStart(2, '0'),
