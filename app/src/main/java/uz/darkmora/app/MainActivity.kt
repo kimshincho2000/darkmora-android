@@ -117,6 +117,7 @@ fun MainApp(
     onTargetSlugConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val sessionManager = remember { UserSessionManager(context) }
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()
 
