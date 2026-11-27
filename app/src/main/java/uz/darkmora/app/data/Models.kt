@@ -26,7 +26,8 @@ data class Anime(
     @SerializedName("last_qism") val lastQism: Any? = null,
     val qism: Any? = null,
     @SerializedName("episodes_count") val episodesCount: Any? = null,
-    @SerializedName("qismlar_soni") val qismlarSoni: Any? = null
+    @SerializedName("qismlar_soni") val qismlarSoni: Any? = null,
+    @SerializedName("mal_id") val malId: Int? = null
 ) {
     fun displayTitle(): String = title ?: nom ?: "Nomsiz anime"
     fun displayPoster(): String = poster ?: imageUrl ?: ""
@@ -218,4 +219,43 @@ data class AddCommentResponse(
     val ok: Boolean = false,
     val error: String? = null,
     val data: AnimeComment? = null
+)
+
+data class AniSkipResponse(
+    val ok: Boolean = false,
+    val op: List<Double>? = null,
+    val ed: List<Double>? = null,
+    val recap: List<Double>? = null
+)
+
+data class W2gCreateResponse(
+    val ok: Boolean = false,
+    val code: String? = null,
+    @SerializedName("share_url") val shareUrl: String? = null,
+    val error: String? = null
+)
+
+data class W2gRoomInfo(
+    val code: String = "",
+    val slug: String = "",
+    @SerializedName("anime_title") val animeTitle: String = "",
+    val ep: Int = 1,
+    @SerializedName("current_time") val currentTime: Double = 0.0,
+    @SerializedName("is_playing") val isPlaying: Boolean = true,
+    val viewers: Int = 1,
+    @SerializedName("updated_at") val updatedAt: Double = 0.0
+)
+
+data class W2gMessageItem(
+    val id: Int = 0,
+    val name: String = "",
+    val text: String = "",
+    @SerializedName("is_reaction") val isReaction: Int = 0
+)
+
+data class W2gStateResponse(
+    val ok: Boolean = false,
+    val room: W2gRoomInfo? = null,
+    val messages: List<W2gMessageItem>? = emptyList(),
+    val error: String? = null
 )

@@ -283,4 +283,80 @@ object DarkmoraApi {
         }
         executeJson(builder.build())
     }
+
+    // --- ANISKIP (INTRO / OUTRO TIMESTAMPS) & WATCH2GETHER ---
+
+    private const val WEB_API_URL = "https://d.darkmora.uz/api.php"
+
+    suspend fun getAniSkip(malId: Int, ep: Int): AniSkipResponse = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$WEB_API_URL?action=aniskip&mal_id=$malId&ep=$ep")
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun w2gCreate(
+        slug: String,
+        animeTitle: String,
+        ep: Int,
+        currentTime: Double,
+        isPlaying: Boolean,
+        clientId: String,
+        hostName: String
+    ): W2gCreateResponse = withContext(Dispatchers.IO) {
+        val payload = mapOf(
+            "slug" to slug,
+            "anime_title" to animeTitle,
+            "ep" to ep,
+            "current_time" to currentTime,
+            "is_playing" to isPlaying,
+            "client_id" to clientId,
+            "host_name" to hostName
+        )
+        val req = Request.Builder()
+            .url("$WEB_API_URL?action=w2g_create")
+            .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun w2gState(room: String, clientId: String, name: String, afterId: Int = 0): W2gStateResponse = withContext(Dispatchers.IO) {
+        val req = Request.Builder()
+            .url("$WEB_API_URL?action=w2g_state&room=${enc(room)}&client_id=${enc(clientId)}&name=${enc(name)}&after_id=$afterId")
+            .build()
+        executeJson(req)
+    }
+
+    suspend fun w2gSync(room: String, ep: Int, currentTime: Double, isPlaying: Boolean) = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf(
+                "room" to room,
+                "ep" to ep,
+                "current_time" to currentTime,
+                "is_playing" to isPlaying
+            )
+            val req = Request.Builder()
+                .url("$WEB_API_URL?action=w2g_sync")
+                .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+                .build()
+            client.newCall(req).execute().close()
+        } catch (_: Exception) {}
+    }
+
+    suspend fun w2gChat(room: String, clientId: String, name: String, text: String, isReaction: Boolean = false) = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf(
+                "room" to room,
+                "client_id" to clientId,
+                "name" to name,
+                "text" to text,
+                "is_reaction" to if (isReaction) 1 else 0
+            )
+            val req = Request.Builder()
+                .url("$WEB_API_URL?action=w2g_chat")
+                .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+                .build()
+            client.newCall(req).execute().close()
+        } catch (_: Exception) {}
+    }
 }

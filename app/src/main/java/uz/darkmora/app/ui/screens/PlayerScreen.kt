@@ -119,25 +119,26 @@ import kotlin.math.sin
 // APPLE TV+ / iOS 26 LIQUID GLASS 1:1 PLAYER (EXACT MATCH TO REFERENCE PHOTO)
 // ============================================================================
 
+// Crystal-Clear Liquid Glass Player Surfaces
 private val GlassFill = Brush.verticalGradient(
     colors = listOf(
-        Color(0x75383532),
-        Color(0x881E1C1A)
+        Color(0x28FFFFFF),
+        Color(0x140E1016)
     )
 )
 
 private val GlassActiveFill = Brush.verticalGradient(
     colors = listOf(
-        Color(0x99524E4A),
-        Color(0xAA2D2A27)
+        Color(0x52FFFFFF),
+        Color(0x2AFFFFFF)
     )
 )
 
 private val GlassBorderBrush = Brush.verticalGradient(
     colors = listOf(
-        Color(0x66FFFFFF),
-        Color(0x18FFFFFF),
-        Color(0x38FFFFFF)
+        Color(0xA6FFFFFF),
+        Color(0x30FFFFFF),
+        Color(0x55FFFFFF)
     )
 )
 
@@ -228,6 +229,36 @@ fun PlayerScreen(
     var isCastingToTv by remember { mutableStateOf(false) }
     val connectedTv = TvCastState.connectedTv
     var tvScanTick by remember { mutableIntStateOf(0) }
+
+    // Skip Intro / Outro (AniSkip) + Watch2Gether States
+    var skipOp by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var skipEd by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var skipRecap by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+
+    val w2gClientId = remember { "and_" + (System.currentTimeMillis() % 1000000L).toString(36) }
+    val w2gUserName = remember { sessionManager.getUser()?.getEffectiveName() ?: "Mehmon" }
+    var w2gRoomCode by remember { mutableStateOf<String?>(null) }
+    var w2gShareUrl by remember { mutableStateOf("") }
+    var w2gViewers by remember { mutableIntStateOf(1) }
+    var w2gJoinInput by remember { mutableStateOf("") }
+    var w2gLastUpdated by remember { mutableDoubleStateOf(0.0) }
+
+    LaunchedEffect(animeDetail?.malId, currentEpNum) {
+        skipOp = null
+        skipEd = null
+        skipRecap = null
+        val malId = animeDetail?.malId ?: 0
+        if (malId > 0 && currentEpNum > 0) {
+            try {
+                val res = DarkmoraApi.getAniSkip(malId, currentEpNum)
+                if (res.ok) {
+                    res.op?.takeIf { it.size >= 2 }?.let { skipOp = it[0] to it[1] }
+                    res.ed?.takeIf { it.size >= 2 }?.let { skipEd = it[0] to it[1] }
+                    res.recap?.takeIf { it.size >= 2 }?.let { skipRecap = it[0] to it[1] }
+                }
+            } catch (_: Exception) {}
+        }
+    }
     var showTvScreensaver by remember { mutableStateOf(false) }
     var seekIndicatorText by remember { mutableStateOf<String?>(null) }
     var isDraggingSeek by remember { mutableStateOf(false) }
@@ -987,31 +1018,22 @@ fun PlayerScreen(
                         }
                     }
 
-                    // Bottom Pills Row: [Ma'lumot]   [Tafsilotlar]   [Qismlar ro'yxati]
+                    // Bottom Pills Row: [👥 Birga ko'rish]   [Qismlar ro'yxati]
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         GlassBottomPill(
-                            text = tr("Ma'lumot", "Info", "Инфо"),
-                            isSelected = activeBottomSheet == "info",
+                            text = if (w2gRoomCode != null) "🟢 $w2gRoomCode • 👥 $w2gViewers" else "👥 ${tr("Birga ko'rish", "Watch Party", "Вместе")}",
+                            isSelected = activeBottomSheet == "w2g" || w2gRoomCode != null,
                             onClick = {
-                                activeBottomSheet = if (activeBottomSheet == "info") null else "info"
+                                activeBottomSheet = if (activeBottomSheet == "w2g") null else "w2g"
                                 lastInteractionTick++
                             }
                         )
 
                         GlassBottomPill(
-                            text = tr("Tafsilotlar", "InSight", "Детали"),
-                            isSelected = activeBottomSheet == "insight",
-                            onClick = {
-                                activeBottomSheet = if (activeBottomSheet == "insight") null else "insight"
-                                lastInteractionTick++
-                            }
-                        )
-
-                        GlassBottomPill(
-                            text = tr("Qismlar ro'yxati", "Continue Watching", "Список серий"),
+                            text = tr("Qismlar ro'yxati", "Episodes", "Список серий"),
                             isSelected = activeBottomSheet == "continue",
                             onClick = {
                                 activeBottomSheet = if (activeBottomSheet == "continue") null else "continue"
@@ -1020,6 +1042,75 @@ fun PlayerScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // 3b. Floating Liquid Glass Skip Intro / Outro Button (appears automatically during OP/ED/Recap)
+        val curSec = currentPosition / 1000.0
+        val activeSkipTarget: Pair<String, Double>? = remember(curSec, skipOp, skipEd, skipRecap) {
+            when {
+                skipOp != null && curSec >= skipOp!!.first && curSec < skipOp!!.second - 1.5 ->
+                    tr("Intro o'tkazish", "Skip Intro", "Пропустить опенинг") to skipOp!!.second
+                skipRecap != null && curSec >= skipRecap!!.first && curSec < skipRecap!!.second - 1.5 ->
+                    tr("Takrorni o'tkazish", "Skip Recap", "Пропустить повтор") to skipRecap!!.second
+                skipEd != null && curSec >= skipEd!!.first && curSec < skipEd!!.second - 1.5 ->
+                    tr("Outro o'tkazish", "Skip Outro", "Пропустить эндинг") to skipEd!!.second
+                else -> null
+            }
+        }
+        AnimatedVisibility(
+            visible = activeSkipTarget != null,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(200)) { it / 2 },
+            exit = fadeOut(tween(160)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 128.dp)
+        ) {
+            activeSkipTarget?.let { (label, targetSec) ->
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(GlassFill)
+                        .border(1.dp, GlassBorderBrush, RoundedCornerShape(50))
+                        .clickable {
+                            exoPlayer.seekTo((targetSec * 1000.0).toLong())
+                            w2gRoomCode?.let { rc ->
+                                scope.launch { DarkmoraApi.w2gSync(rc, currentEpNum, targetSec, exoPlayer.isPlaying) }
+                            }
+                        }
+                        .padding(horizontal = 18.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = "⏭️ $label",
+                        color = Color.White,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
+
+        // Watch2Gether Live Sync Loop
+        LaunchedEffect(w2gRoomCode) {
+            val code = w2gRoomCode ?: return@LaunchedEffect
+            while (w2gRoomCode == code) {
+                try {
+                    val st = DarkmoraApi.w2gState(code, w2gClientId, w2gUserName, 0)
+                    if (st.ok && st.room != null) {
+                        val rm = st.room
+                        w2gViewers = rm.viewers
+                        if (rm.updatedAt > w2gLastUpdated + 0.05) {
+                            w2gLastUpdated = rm.updatedAt
+                            val drift = kotlin.math.abs((exoPlayer.currentPosition / 1000.0) - rm.currentTime)
+                            if (drift > 2.0) {
+                                exoPlayer.seekTo((rm.currentTime * 1000.0).toLong())
+                            }
+                            if (rm.isPlaying && !exoPlayer.isPlaying) exoPlayer.play()
+                            else if (!rm.isPlaying && exoPlayer.isPlaying) exoPlayer.pause()
+                        }
+                    }
+                } catch (_: Exception) {}
+                delay(1800L)
             }
         }
 
@@ -1053,6 +1144,91 @@ fun PlayerScreen(
                     .padding(18.dp)
             ) {
                 when (activeBottomSheet) {
+                    "w2g" -> {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = if (w2gRoomCode != null) "🟢 Xona: $w2gRoomCode • 👥 $w2gViewers kishi" else "👥 ${tr("Birga ko'rish (Watch2Gether)", "Watch2Gether", "Смотреть вместе")}",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (w2gRoomCode == null) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    GlassBottomPill(
+                                        text = "🎬 Xona ochish",
+                                        isSelected = true,
+                                        onClick = {
+                                            scope.launch {
+                                                try {
+                                                    val res = DarkmoraApi.w2gCreate(
+                                                        slug = slug.ifBlank { animeBaseTitle },
+                                                        animeTitle = animeBaseTitle,
+                                                        ep = currentEpNum,
+                                                        currentTime = exoPlayer.currentPosition / 1000.0,
+                                                        isPlaying = exoPlayer.isPlaying,
+                                                        clientId = w2gClientId,
+                                                        hostName = w2gUserName
+                                                    )
+                                                    if (res.ok && !res.code.isNullOrBlank()) {
+                                                        w2gRoomCode = res.code
+                                                        w2gShareUrl = res.shareUrl ?: "https://d.darkmora.uz/#w2g/${res.code}"
+                                                        Toast.makeText(context, "Xona ochildi: ${res.code}", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                } catch (_: Exception) {
+                                                    Toast.makeText(context, "Xona ochishda xatolik", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    GlassBottomPill(
+                                        text = "✈️ Ulashish",
+                                        isSelected = true,
+                                        onClick = {
+                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "text/plain"
+                                                putExtra(Intent.EXTRA_TEXT, "🎬 $animeBaseTitle ($currentEpNum-qism) ni DarkMora'da birga ko'ramiz!\n$w2gShareUrl")
+                                            }
+                                            context.startActivity(Intent.createChooser(sendIntent, "Xonani ulashish"))
+                                        }
+                                    )
+                                    GlassBottomPill(
+                                        text = "🔄 Sinxronlash",
+                                        isSelected = false,
+                                        onClick = {
+                                            w2gRoomCode?.let { rc ->
+                                                scope.launch {
+                                                    DarkmoraApi.w2gSync(rc, currentEpNum, exoPlayer.currentPosition / 1000.0, exoPlayer.isPlaying)
+                                                    Toast.makeText(context, "Barcha ishtirokchilar sinxronlandi", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        }
+                                    )
+                                    GlassBottomPill(
+                                        text = "Chiqish",
+                                        isSelected = false,
+                                        onClick = {
+                                            w2gRoomCode = null
+                                            w2gShareUrl = ""
+                                            activeBottomSheet = null
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     "info" -> {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
