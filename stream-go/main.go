@@ -342,7 +342,7 @@ func (w *BotWorker) getDCAPI(ctx context.Context, dcID int) (*tg.Client, error) 
 	if c, ok := w.dcClients[dcID]; ok {
 		return c, nil
 	}
-	inv, err := w.client.DC(ctx, dcID, 1)
+	inv, err := w.client.DC(ctx, dcID, 2)
 	if err != nil {
 		return nil, err
 	}
@@ -361,8 +361,10 @@ func (w *BotWorker) fetchChunk(ctx context.Context, doc *tg.Document, offset int
 		return nil, err
 	}
 	t0 := time.Now()
+	// Telegram requires Precise:false when offset is aligned to limit (fastest & avoids LIMIT_INVALID)
+	needPrecise := (offset % int64(limit)) != 0
 	res, err := api.UploadGetFile(cctx, &tg.UploadGetFileRequest{
-		Precise: true,
+		Precise: needPrecise,
 		Location: &tg.InputDocumentFileLocation{
 			ID:            doc.ID,
 			AccessHash:    doc.AccessHash,
@@ -1277,15 +1279,76 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Fast 256KB Seek Burst + 2-Chunk Parallel Lookahead Pipeline (Zero stall between chunks!)
+	// 3. 4-Way Parallel Ordered Multi-Bot Pipeline (4 bots fetch simultaneously = 3-4x faster!)
 	ctx, cancelStream := context.WithCancel(r.Context())
 	defer cancelStream()
 
-	type pipeChunk struct {
-		data []byte
-		err  error
+	type chunkJob struct {
+		curPos     int64
+		left       int64
+		alignedOff int64
+		reqLimit   int
+		cacheBlk   bool
+		resultCh   chan struct {
+			data []byte
+			err  error
+		}
 	}
-	pipeCh := make(chan pipeChunk, 2) // 2-chunk lookahead buffer (~2MB max per active stream)
+
+	// Build ordered chunk descriptors for this Range request
+	var jobs []*chunkJob
+	simPos := pos
+	simLeft := needed
+	for simLeft > 0 {
+		var alignedOff int64
+		var reqLimit int
+		cacheBlk := !isDownload
+		if simPos > 0 && !isDownload && (simPos%chunkAlign != 0) {
+			alignedOff = (simPos / seekFirstChunk) * seekFirstChunk
+			reqLimit = seekFirstChunk
+			cacheBlk = false
+		} else {
+			alignedOff = (simPos / chunkAlign) * chunkAlign
+			reqLimit = chunkSize
+		}
+		avail := (alignedOff + int64(reqLimit)) - simPos
+		take := min(avail, simLeft)
+		jobs = append(jobs, &chunkJob{
+			curPos:     simPos,
+			left:       take,
+			alignedOff: alignedOff,
+			reqLimit:   reqLimit,
+			cacheBlk:   cacheBlk,
+			resultCh: make(chan struct {
+				data []byte
+				err  error
+			}, 1),
+		})
+		simPos += take
+		simLeft -= take
+	}
+
+	// Sliding window of 4 parallel fetchers (max 4MB in flight per stream)
+	const parallelFetchers = 4
+	sem := make(chan struct{}, parallelFetchers)
+	go func() {
+		for _, job := range jobs {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			j := job
+			go func() {
+				defer func() { <-sem }()
+				data, err := fetchBlockSingleflight(ctx, msgID, j.alignedOff, j.reqLimit, j.cacheBlk)
+				j.resultCh <- struct {
+					data []byte
+					err  error
+				}{data: data, err: err}
+			}()
+		}
+	}()
 
 	var headBuf []byte
 	if start == 0 {
@@ -1294,68 +1357,36 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	go func(startPos, rem int64) {
-		defer close(pipeCh)
-		curPos := startPos
-		left := rem
-		for left > 0 {
-			if ctx.Err() != nil {
-				return
-			}
-			var alignedOff int64
-			var reqLimit int
-			cacheBlk := !isDownload
-			if curPos > 0 && !isDownload && (curPos%chunkAlign != 0) {
-				alignedOff = (curPos / seekFirstChunk) * seekFirstChunk
-				reqLimit = seekFirstChunk
-				cacheBlk = false
-			} else {
-				alignedOff = (curPos / chunkAlign) * chunkAlign
-				reqLimit = chunkSize
-			}
-			data, err := fetchBlockSingleflight(ctx, msgID, alignedOff, reqLimit, cacheBlk)
-			if err != nil || len(data) == 0 {
-				select {
-				case pipeCh <- pipeChunk{err: err}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			skip := curPos - alignedOff
-			if skip < 0 || skip >= int64(len(data)) {
-				return
-			}
-			piece := data[skip:]
-			if int64(len(piece)) > left {
-				piece = piece[:left]
-			}
-			select {
-			case pipeCh <- pipeChunk{data: piece}:
-			case <-ctx.Done():
-				return
-			}
-			curPos += int64(len(piece))
-			left -= int64(len(piece))
-		}
-	}(pos, needed)
-
-	for item := range pipeCh {
-		if item.err != nil {
-			statErrors.Add(1)
+	for _, job := range jobs {
+		select {
+		case <-ctx.Done():
 			return
+		case res := <-job.resultCh:
+			if res.err != nil || len(res.data) == 0 {
+				statErrors.Add(1)
+				return
+			}
+			skip := job.curPos - job.alignedOff
+			if skip < 0 || skip >= int64(len(res.data)) {
+				return
+			}
+			piece := res.data[skip:]
+			if int64(len(piece)) > job.left {
+				piece = piece[:job.left]
+			}
+			nw, err := w.Write(piece)
+			if err != nil {
+				return
+			}
+			if flusher != nil {
+				flusher.Flush()
+			}
+			if headBuf != nil && len(headBuf) < headCacheSize {
+				take := min(len(piece), headCacheSize-len(headBuf))
+				headBuf = append(headBuf, piece[:take]...)
+			}
+			statBytes.Add(int64(nw))
 		}
-		nw, err := w.Write(item.data)
-		if err != nil {
-			return
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		if headBuf != nil && len(headBuf) < headCacheSize {
-			take := min(len(item.data), headCacheSize-len(headBuf))
-			headBuf = append(headBuf, item.data[:take]...)
-		}
-		statBytes.Add(int64(nw))
 	}
 	if len(headBuf) >= 262144 {
 		go writeFileAtomic(headPath, headBuf)
@@ -1397,7 +1428,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":         "ok",
 		"engine":         "go-gotd",
-		"version":        "1.1",
+		"version":        "1.2",
 		"uptime":         int(time.Since(startTime).Seconds()),
 		"go_heap_mb":     float64(mem.HeapAlloc) / (1024 * 1024),
 		"go_sys_mb":      float64(mem.Sys) / (1024 * 1024),
