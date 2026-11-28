@@ -368,10 +368,10 @@ fun AdminLoginScreen(
 
 @Composable
 private fun adminGlassFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Color(0x99FFFFFF),
-    unfocusedBorderColor = Color(0x2EFFFFFF),
-    focusedContainerColor = Color(0x73151B2C),
-    unfocusedContainerColor = Color(0x520D111C),
+    focusedBorderColor = Color(0xCCFFFFFF),
+    unfocusedBorderColor = Color(0x45FFFFFF),
+    focusedContainerColor = Color(0x28141E33),
+    unfocusedContainerColor = Color(0x160A101D),
     focusedTextColor = TextPrimary,
     unfocusedTextColor = TextPrimary,
     cursorColor = AccentCyan

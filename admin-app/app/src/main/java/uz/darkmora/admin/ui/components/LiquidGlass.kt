@@ -86,104 +86,115 @@ fun LiquidAuroraBackground(modifier: Modifier = Modifier) {
         val w = size.width
         val h = size.height
 
-        // Orb 1: Deep Electric Blue / Cyan top-left drift
+        // Orb 1: Vivid Electric Blue / Cyan top-left drift (shines clearly through glass)
         val c1 = Offset(
-            x = w * (0.22f + 0.16f * cos(phase1)),
-            y = h * (0.16f + 0.08f * sin(phase1 * 1.2f))
+            x = w * (0.20f + 0.18f * cos(phase1)),
+            y = h * (0.15f + 0.09f * sin(phase1 * 1.2f))
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(AccentBlue.copy(alpha = 0.24f), AccentCyan.copy(alpha = 0.08f), Color.Transparent),
+                colors = listOf(AccentBlue.copy(alpha = 0.42f), AccentCyan.copy(alpha = 0.18f), Color.Transparent),
                 center = c1,
-                radius = w * 0.72f
+                radius = w * 0.78f
             ),
-            radius = w * 0.72f,
+            radius = w * 0.78f,
             center = c1
         )
 
-        // Orb 2: Liquid Violet right-mid drift
+        // Orb 2: Vivid Liquid Violet right-mid drift
         val c2 = Offset(
-            x = w * (0.82f + 0.14f * sin(phase2)),
-            y = h * (0.46f + 0.12f * cos(phase2))
+            x = w * (0.84f + 0.14f * sin(phase2)),
+            y = h * (0.45f + 0.13f * cos(phase2))
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(AccentViolet.copy(alpha = 0.22f), AccentRose.copy(alpha = 0.06f), Color.Transparent),
+                colors = listOf(AccentViolet.copy(alpha = 0.38f), AccentRose.copy(alpha = 0.13f), Color.Transparent),
                 center = c2,
-                radius = w * 0.68f
+                radius = w * 0.74f
             ),
-            radius = w * 0.68f,
+            radius = w * 0.74f,
             center = c2
         )
 
-        // Orb 3: Soft Emerald bottom-left glow
+        // Orb 3: Crisp Emerald / Teal bottom-left glow
         val c3 = Offset(
-            x = w * (0.28f + 0.18f * cos(phase3 + 1.4f)),
-            y = h * (0.84f + 0.09f * sin(phase3))
+            x = w * (0.26f + 0.18f * cos(phase3 + 1.4f)),
+            y = h * (0.83f + 0.10f * sin(phase3))
         )
         drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(AccentEmerald.copy(alpha = 0.16f), AccentCyan.copy(alpha = 0.05f), Color.Transparent),
+                colors = listOf(AccentEmerald.copy(alpha = 0.30f), AccentCyan.copy(alpha = 0.12f), Color.Transparent),
                 center = c3,
-                radius = w * 0.64f
+                radius = w * 0.70f
             ),
-            radius = w * 0.64f,
+            radius = w * 0.70f,
             center = c3
         )
     }
 }
 
 // ============================================================================
-// 2. CRYSTAL LIQUID GLASS MODIFIER (SPECULAR RIM + CAUSTIC GRADIENT + SHEEN)
+// 2. CRYSTAL-CLEAR LIQUID GLASS MODIFIER (ULTRA-TRANSPARENT + PRISMATIC RIM)
 // ============================================================================
 
 fun Modifier.liquidGlass(
     shape: Shape = RoundedCornerShape(24.dp),
     tint: Color = Color.White,
-    glassAlpha: Float = 0.10f,
-    borderAlpha: Float = 0.34f,
-    elevation: Dp = 10.dp
+    glassAlpha: Float = 0.06f,
+    borderAlpha: Float = 0.48f,
+    elevation: Dp = 8.dp
 ): Modifier = this
     .shadow(
         elevation = elevation,
         shape = shape,
-        ambientColor = Color.Black.copy(alpha = 0.55f),
-        spotColor = Color.Black.copy(alpha = 0.65f)
+        ambientColor = Color.Black.copy(alpha = 0.32f),
+        spotColor = Color.Black.copy(alpha = 0.40f)
     )
     .clip(shape)
     .background(
         brush = Brush.linearGradient(
             colors = listOf(
-                tint.copy(alpha = glassAlpha + 0.07f),
-                Color(0x9A0C101B),
-                Color(0xA6090C14),
-                tint.copy(alpha = glassAlpha * 0.65f)
+                Color.White.copy(alpha = (glassAlpha + 0.05f).coerceAtMost(0.18f)),
+                Color(0x240A101E),
+                Color(0x18070B14),
+                tint.copy(alpha = (glassAlpha * 0.85f).coerceAtMost(0.14f))
             )
         )
     )
     .drawWithContent {
         drawContent()
-        // Top-edge liquid glass specular lens highlight
+        // Razor-sharp top meniscus specular reflection (crystal lens edge, zero milkiness)
         drawRect(
             brush = Brush.verticalGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = 0.16f),
-                    Color.White.copy(alpha = 0.02f),
+                    Color.White.copy(alpha = 0.24f),
+                    Color.White.copy(alpha = 0.04f),
                     Color.Transparent
                 ),
                 startY = 0f,
-                endY = size.height * 0.38f
+                endY = size.height * 0.18f
+            )
+        )
+        // Subtle bottom-right caustic bounce light
+        drawRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    tint.copy(alpha = 0.06f)
+                ),
+                startY = size.height * 0.82f,
+                endY = size.height
             )
         )
     }
     .border(
-        width = 1.dp,
+        width = 1.15.dp,
         brush = Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = borderAlpha + 0.18f),
-                tint.copy(alpha = borderAlpha * 0.55f),
-                Color.White.copy(alpha = borderAlpha * 0.22f),
-                Color.White.copy(alpha = borderAlpha * 0.72f)
+                Color.White.copy(alpha = (borderAlpha + 0.30f).coerceAtMost(0.88f)),
+                AccentCyan.copy(alpha = borderAlpha * 0.42f),
+                Color.White.copy(alpha = borderAlpha * 0.16f),
+                Color.White.copy(alpha = (borderAlpha + 0.12f).coerceAtMost(0.68f))
             )
         ),
         shape = shape
@@ -191,14 +202,14 @@ fun Modifier.liquidGlass(
 
 fun Modifier.liquidGlassPill(
     tint: Color = Color.White,
-    glassAlpha: Float = 0.12f,
-    borderAlpha: Float = 0.36f
+    glassAlpha: Float = 0.07f,
+    borderAlpha: Float = 0.52f
 ): Modifier = this.liquidGlass(
     shape = RoundedCornerShape(50),
     tint = tint,
     glassAlpha = glassAlpha,
     borderAlpha = borderAlpha,
-    elevation = 8.dp
+    elevation = 6.dp
 )
 
 // ============================================================================
