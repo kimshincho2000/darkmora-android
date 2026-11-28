@@ -816,7 +816,7 @@ func cleanSHMCache() {
 	sort.Slice(blks, func(i, j int) bool { return blks[i].mtime.Before(blks[j].mtime) })
 	sort.Slice(hts, func(i, j int) bool { return hts[i].mtime.Before(hts[j].mtime) })
 	all := append(blks, hts...)
-	target := total - int64(float64(maxShmBytes)*0.72)
+	target := total - (maxShmBytes * 72 / 100)
 	var freed int64
 	for _, fe := range all {
 		if freed >= target {
@@ -856,7 +856,7 @@ func cleanSSDCache() {
 		return
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mtime.Before(files[j].mtime) })
-	target := total - int64(float64(maxHotSSDBytes)*0.80)
+	target := total - (maxHotSSDBytes * 80 / 100)
 	var freed int64
 	for _, fe := range files {
 		if freed >= target {
