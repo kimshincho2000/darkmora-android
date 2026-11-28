@@ -39,6 +39,10 @@ const (
 	seekFirstChunk       = 256 * 1024  // 256KB instant seek first burst
 	headCacheSize        = 4 * 1024 * 1024
 	tailCacheSize        = 2 * 1024 * 1024
+	maxShmBytes          = 155 * 1024 * 1024
+	maxHotSSDBytes       = 3 * 1024 * 1024 * 1024 // 3GB LRU SSD cache
+	hotMaxFileBytes      = 450 * 1024 * 1024
+	hotViewerThreshold   = 2
 	maxRangeWindow       = 8 * 1024 * 1024
 	seekRangeWindow      = 6 * 1024 * 1024
 	msgCacheTTL          = 6 * time.Hour
@@ -78,6 +82,15 @@ var (
 
 	inflightMu      sync.Mutex
 	inflightChunks  = make(map[[2]int64]*inflightCall)
+
+	prefetchMu      sync.Mutex
+	activePrefetch  = make(map[int]bool)
+	prefetchSem     = make(chan struct{}, 4)
+
+	hotMu           sync.Mutex
+	hotViewers      = make(map[int]map[string]time.Time)
+	hotJobs         = make(map[int]bool)
+	hotSem          = make(chan struct{}, 1)
 
 	statRequests     atomic.Int64
 	statBytes        atomic.Int64
@@ -762,6 +775,237 @@ func findSSDCached(msgID int) string {
 	return ""
 }
 
+func cleanSHMCache() {
+	entries, err := os.ReadDir(shmDir)
+	if err != nil {
+		return
+	}
+	type fEntry struct {
+		path  string
+		size  int64
+		mtime time.Time
+		isBlk bool
+	}
+	var blks, hts []fEntry
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		p := filepath.Join(shmDir, name)
+		if strings.HasSuffix(name, ".tmp") || strings.HasPrefix(name, "mid_") {
+			_ = os.Remove(p)
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		fe := fEntry{path: p, size: fi.Size(), mtime: fi.ModTime(), isBlk: strings.HasPrefix(name, "blk_")}
+		total += fe.size
+		if fe.isBlk {
+			blks = append(blks, fe)
+		} else {
+			hts = append(hts, fe)
+		}
+	}
+	if total <= maxShmBytes {
+		return
+	}
+	sort.Slice(blks, func(i, j int) bool { return blks[i].mtime.Before(blks[j].mtime) })
+	sort.Slice(hts, func(i, j int) bool { return hts[i].mtime.Before(hts[j].mtime) })
+	all := append(blks, hts...)
+	target := total - int64(float64(maxShmBytes)*0.72)
+	var freed int64
+	for _, fe := range all {
+		if freed >= target {
+			break
+		}
+		if os.Remove(fe.path) == nil {
+			freed += fe.size
+		}
+	}
+}
+
+func cleanSSDCache() {
+	entries, err := os.ReadDir(transcodedDir)
+	if err != nil {
+		return
+	}
+	type fEntry struct {
+		path  string
+		size  int64
+		mtime time.Time
+	}
+	var files []fEntry
+	var total int64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".mp4") || strings.HasSuffix(e.Name(), "_tmp.mp4") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil {
+			continue
+		}
+		p := filepath.Join(transcodedDir, e.Name())
+		files = append(files, fEntry{path: p, size: fi.Size(), mtime: fi.ModTime()})
+		total += fi.Size()
+	}
+	if total <= maxHotSSDBytes {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].mtime.Before(files[j].mtime) })
+	target := total - int64(float64(maxHotSSDBytes)*0.80)
+	var freed int64
+	for _, fe := range files {
+		if freed >= target {
+			break
+		}
+		if os.Remove(fe.path) == nil {
+			freed += fe.size
+		}
+	}
+}
+
+func prefetchPart(msgID int, offset, length int64, outPath string) {
+	if _, err := os.Stat(outPath); err == nil {
+		return
+	}
+	prefetchSem <- struct{}{}
+	defer func() { <-prefetchSem }()
+	if _, err := os.Stat(outPath); err == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	aligned := (offset / chunkAlign) * chunkAlign
+	skip := offset - aligned
+	need := length + skip
+	buf := make([]byte, 0, need)
+	for cur := aligned; int64(len(buf)) < need; cur += chunkSize {
+		b, err := fetchBlockSingleflight(ctx, msgID, cur, chunkSize, false)
+		if err != nil || len(b) == 0 {
+			return
+		}
+		buf = append(buf, b...)
+	}
+	if int64(len(buf)) > skip {
+		end := min(int64(len(buf)), skip+length)
+		writeFileAtomic(outPath, buf[skip:end])
+	}
+}
+
+func ensureTailHeadCached(msgID int, totalSize int64, alsoHead bool) {
+	prefetchMu.Lock()
+	if activePrefetch[msgID] {
+		prefetchMu.Unlock()
+		return
+	}
+	activePrefetch[msgID] = true
+	prefetchMu.Unlock()
+
+	go func() {
+		defer func() {
+			prefetchMu.Lock()
+			delete(activePrefetch, msgID)
+			prefetchMu.Unlock()
+		}()
+		if alsoHead {
+			hp := filepath.Join(shmDir, fmt.Sprintf("head_%d.bin", msgID))
+			prefetchPart(msgID, 0, min(headCacheSize, totalSize), hp)
+		}
+		if totalSize > tailCacheSize {
+			tp := filepath.Join(shmDir, fmt.Sprintf("tail_%d.bin", msgID))
+			prefetchPart(msgID, totalSize-tailCacheSize, tailCacheSize, tp)
+		}
+	}()
+}
+
+func trackHotEpisode(msgID int, clientIP string, totalSize int64, mimeType string) {
+	if clientIP == "" || clientIP == "127.0.0.1" || clientIP == "::1" || totalSize <= 0 || totalSize > hotMaxFileBytes {
+		return
+	}
+	if strings.Contains(strings.ToLower(mimeType), "matroska") || findSSDCached(msgID) != "" {
+		return
+	}
+	now := time.Now()
+	hotMu.Lock()
+	if hotJobs[msgID] {
+		hotMu.Unlock()
+		return
+	}
+	vm := hotViewers[msgID]
+	if vm == nil {
+		if len(hotViewers) > 300 {
+			hotViewers = make(map[int]map[string]time.Time)
+		}
+		vm = make(map[string]time.Time)
+		hotViewers[msgID] = vm
+	}
+	vm[clientIP] = now
+	active := 0
+	for ip, ts := range vm {
+		if now.Sub(ts) <= 30*time.Minute {
+			active++
+		} else {
+			delete(vm, ip)
+		}
+	}
+	if active < hotViewerThreshold {
+		hotMu.Unlock()
+		return
+	}
+	hotJobs[msgID] = true
+	hotMu.Unlock()
+
+	go func() {
+		defer func() {
+			hotMu.Lock()
+			delete(hotJobs, msgID)
+			hotMu.Unlock()
+		}()
+		hotSem <- struct{}{}
+		defer func() { <-hotSem }()
+		if findSSDCached(msgID) != "" {
+			return
+		}
+		dst := filepath.Join(transcodedDir, fmt.Sprintf("hot_%d.mp4", msgID))
+		tmp := filepath.Join(transcodedDir, fmt.Sprintf("hot_%d_tmp.mp4", msgID))
+		f, err := os.Create(tmp)
+		if err != nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		var written int64
+		for off := int64(0); off < totalSize; off += chunkSize {
+			b, err := fetchBlockSingleflight(ctx, msgID, off, chunkSize, false)
+			if err != nil || len(b) == 0 {
+				f.Close()
+				_ = os.Remove(tmp)
+				return
+			}
+			n, werr := f.Write(b)
+			if werr != nil {
+				f.Close()
+				_ = os.Remove(tmp)
+				return
+			}
+			written += int64(n)
+		}
+		f.Close()
+		if written >= int64(float64(totalSize)*0.99) {
+			_ = os.Rename(tmp, dst)
+			log.Printf("Hot-SSD cached msg %d (%dMB)", msgID, written/(1024*1024))
+			cleanSSDCache()
+		} else {
+			_ = os.Remove(tmp)
+		}
+	}()
+}
+
 // Singleflight 1MB block fetcher (or fast 256KB seek burst without SHM pollution)
 func fetchBlockSingleflight(ctx context.Context, msgID int, alignedOffset int64, limit int, cacheSHM bool) ([]byte, error) {
 	blkPath := filepath.Join(shmDir, fmt.Sprintf("blk_%d_%d.bin", msgID, alignedOffset))
@@ -863,6 +1107,7 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	qism, _ := strconv.Atoi(q.Get("qism"))
 	token := q.Get("token")
 	isDownload := q.Get("download") == "1"
+	isWarmup := q.Get("warmup") == "1"
 	name := q.Get("name")
 	if name == "" {
 		name = fmt.Sprintf("DarkMora_Ep%d.mp4", max(1, qism))
@@ -902,6 +1147,14 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 	// 0. Direct SSD Cached File
 	if ssd := findSSDCached(msgID); ssd != "" {
 		statHitSSD.Add(1)
+		now := time.Now()
+		_ = os.Chtimes(ssd, now, now)
+		if isWarmup {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			_, _ = fmt.Fprintf(w, `{"ok":true,"cached":"ssd","msg_id":%d}`, msgID)
+			return
+		}
 		if !isDownload {
 			http.Redirect(w, r, "/uploads/transcoded/"+filepath.Base(ssd), http.StatusFound)
 			return
@@ -916,6 +1169,19 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Video fayl topilmadi", http.StatusNotFound)
 		return
 	}
+
+	if isWarmup {
+		ensureTailHeadCached(msgID, totalSize, true)
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		_, _ = fmt.Fprintf(w, `{"ok":true,"warming":true,"msg_id":%d,"size":%d}`, msgID, totalSize)
+		return
+	}
+
+	if !isDownload && r.Method == http.MethodGet {
+		trackHotEpisode(msgID, clientIP, totalSize, mimeType)
+	}
+	ensureTailHeadCached(msgID, totalSize, r.Method == http.MethodHead)
 
 	rangeHdr := r.Header.Get("Range")
 	hasRange := rangeHdr != ""
@@ -1011,53 +1277,88 @@ func handleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 3. Fast 256KB Seek Burst + 1MB Pipelined Singleflight Streaming
-	ctx := r.Context()
-	for needed > 0 {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+	// 3. Fast 256KB Seek Burst + 2-Chunk Parallel Lookahead Pipeline (Zero stall between chunks!)
+	ctx, cancelStream := context.WithCancel(r.Context())
+	defer cancelStream()
+
+	type pipeChunk struct {
+		data []byte
+		err  error
+	}
+	pipeCh := make(chan pipeChunk, 2) // 2-chunk lookahead buffer (~2MB max per active stream)
+
+	var headBuf []byte
+	if start == 0 {
+		if _, err := os.Stat(headPath); err != nil {
+			headBuf = make([]byte, 0, headCacheSize)
 		}
+	}
 
-		// Choose 256KB alignment for mid-file seek when not on a 1MB boundary, else 1MB
-		var alignedOff int64
-		var reqLimit int
-		cacheBlk := !isDownload
-
-		if pos > 0 && !isDownload && (pos%chunkAlign != 0) {
-			alignedOff = (pos / seekFirstChunk) * seekFirstChunk
-			reqLimit = seekFirstChunk
-			cacheBlk = false
-		} else {
-			alignedOff = (pos / chunkAlign) * chunkAlign
-			reqLimit = chunkSize
+	go func(startPos, rem int64) {
+		defer close(pipeCh)
+		curPos := startPos
+		left := rem
+		for left > 0 {
+			if ctx.Err() != nil {
+				return
+			}
+			var alignedOff int64
+			var reqLimit int
+			cacheBlk := !isDownload
+			if curPos > 0 && !isDownload && (curPos%chunkAlign != 0) {
+				alignedOff = (curPos / seekFirstChunk) * seekFirstChunk
+				reqLimit = seekFirstChunk
+				cacheBlk = false
+			} else {
+				alignedOff = (curPos / chunkAlign) * chunkAlign
+				reqLimit = chunkSize
+			}
+			data, err := fetchBlockSingleflight(ctx, msgID, alignedOff, reqLimit, cacheBlk)
+			if err != nil || len(data) == 0 {
+				select {
+				case pipeCh <- pipeChunk{err: err}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			skip := curPos - alignedOff
+			if skip < 0 || skip >= int64(len(data)) {
+				return
+			}
+			piece := data[skip:]
+			if int64(len(piece)) > left {
+				piece = piece[:left]
+			}
+			select {
+			case pipeCh <- pipeChunk{data: piece}:
+			case <-ctx.Done():
+				return
+			}
+			curPos += int64(len(piece))
+			left -= int64(len(piece))
 		}
+	}(pos, needed)
 
-		data, err := fetchBlockSingleflight(ctx, msgID, alignedOff, reqLimit, cacheBlk)
-		if err != nil || len(data) == 0 {
+	for item := range pipeCh {
+		if item.err != nil {
 			statErrors.Add(1)
 			return
 		}
-
-		skip := pos - alignedOff
-		if skip < 0 || skip >= int64(len(data)) {
-			return
-		}
-		piece := data[skip:]
-		if int64(len(piece)) > needed {
-			piece = piece[:needed]
-		}
-		nw, err := w.Write(piece)
+		nw, err := w.Write(item.data)
 		if err != nil {
 			return
 		}
 		if flusher != nil {
 			flusher.Flush()
 		}
-		pos += int64(nw)
-		needed -= int64(nw)
+		if headBuf != nil && len(headBuf) < headCacheSize {
+			take := min(len(item.data), headCacheSize-len(headBuf))
+			headBuf = append(headBuf, item.data[:take]...)
+		}
 		statBytes.Add(int64(nw))
+	}
+	if len(headBuf) >= 262144 {
+		go writeFileAtomic(headPath, headBuf)
 	}
 }
 
@@ -1096,7 +1397,7 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":         "ok",
 		"engine":         "go-gotd",
-		"version":        "1.0",
+		"version":        "1.1",
 		"uptime":         int(time.Since(startTime).Seconds()),
 		"go_heap_mb":     float64(mem.HeapAlloc) / (1024 * 1024),
 		"go_sys_mb":      float64(mem.Sys) / (1024 * 1024),
@@ -1158,8 +1459,23 @@ func main() {
 	defer stop()
 
 	tokens := loadBotTokens()
-	log.Printf("DarkMora Go Turbo Streamer v1.0 starting with %d bots on http://%s", len(tokens), listenAddr)
+	log.Printf("DarkMora Go Turbo Streamer v1.1 starting with %d bots on http://%s", len(tokens), listenAddr)
 	pool.init(ctx, tokens)
+
+	// Background SHM LRU cleaner (45s)
+	go func() {
+		cleanSHMCache()
+		tk := time.NewTicker(45 * time.Second)
+		defer tk.Stop()
+		for {
+			select {
+			case <-tk.C:
+				cleanSHMCache()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/stream/", handleStream)
