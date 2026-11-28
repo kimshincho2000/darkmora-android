@@ -29,8 +29,12 @@ jobs:
           gradle-version: '8.9'
 
       - name: Decode Admin Keystore
-        if: ${{ secrets.DARKMORA_ADMIN_KEYSTORE_B64 != '' }}
-        run: echo "${{ secrets.DARKMORA_ADMIN_KEYSTORE_B64 }}" | base64 -d > admin-app/app/darkmora-admin.jks
+        env:
+          KS_B64: ${{ secrets.DARKMORA_ADMIN_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > admin-app/app/darkmora-admin.jks
+          fi
 
       - name: Build Admin Release APK
         working-directory: admin-app
@@ -45,4 +49,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DarkMora-Admin-APK
-          path: admin-app/app/build/outputs/apk/release/app-release.apk
+          path: admin-app/app/build/outputs/apk/release/*.apk

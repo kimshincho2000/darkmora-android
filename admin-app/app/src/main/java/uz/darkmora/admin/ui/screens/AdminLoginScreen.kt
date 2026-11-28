@@ -2,16 +2,19 @@ package uz.darkmora.admin.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -22,10 +25,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -35,7 +42,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import uz.darkmora.admin.R
 import uz.darkmora.admin.network.AdminApi
+import uz.darkmora.admin.ui.components.liquidGlass
+import uz.darkmora.admin.ui.components.liquidGlassPill
+import uz.darkmora.admin.ui.components.pressBounce
+import uz.darkmora.admin.ui.components.staggeredAppear
 import uz.darkmora.admin.ui.theme.*
 import kotlin.math.*
 
@@ -77,7 +89,6 @@ fun AdminLoginScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BgBlack)
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
@@ -88,19 +99,22 @@ fun AdminLoginScreen(
                 .padding(horizontal = 24.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top centered white shield badge
+            // Top centered Liquid Glass DarkMora Logo Squircle
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.White),
+                    .staggeredAppear(0)
+                    .size(48.dp)
+                    .shadow(16.dp, RoundedCornerShape(15.dp), ambientColor = Color.White.copy(alpha = 0.25f))
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Color.White)
+                    .border(1.dp, Color.White.copy(alpha = 0.55f), RoundedCornerShape(15.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.AdminPanelSettings,
+                Image(
+                    painter = painterResource(id = R.drawable.darkmora_logo),
                     contentDescription = "DarkMora Admin",
-                    tint = Color.Black,
-                    modifier = Modifier.size(22.dp)
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
                 )
             }
 
@@ -110,37 +124,48 @@ fun AdminLoginScreen(
             AdminParticleField(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(195.dp)
+                    .height(185.dp)
             )
 
             Text(
                 text = "DarkMora Admin",
                 color = TextPrimary,
                 fontSize = 30.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = (-0.5).sp,
+                modifier = Modifier.staggeredAppear(1)
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = if (step == 1) "Boshqaruv paneliga xavfsiz kirish" else "Email 2FA tasdiqlash kodi",
                 color = TextSecondary,
                 fontSize = 13.5.sp,
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                modifier = Modifier.staggeredAppear(2)
             )
 
             Spacer(modifier = Modifier.height(24.dp))
 
             AnimatedContent(
                 targetState = step,
-                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                transitionSpec = {
+                    val dir = if (targetState > initialState) 1 else -1
+                    (slideInHorizontally(tween(320)) { it / 3 * dir } + fadeIn(tween(280))) togetherWith
+                        (slideOutHorizontally(tween(260)) { -it / 3 * dir } + fadeOut(tween(200)))
+                },
                 label = "admin_login_step"
             ) { currentStep ->
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(BgCard)
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(26.dp))
+                        .staggeredAppear(3)
+                        .liquidGlass(
+                            shape = RoundedCornerShape(28.dp),
+                            tint = AccentCyan,
+                            glassAlpha = 0.11f,
+                            borderAlpha = 0.36f,
+                            elevation = 16.dp
+                        )
                         .padding(20.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
@@ -152,7 +177,7 @@ fun AdminLoginScreen(
                             leadingIcon = { Icon(Icons.Default.Person, null, tint = TextSecondary, modifier = Modifier.size(19.dp)) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
-                            colors = adminTextFieldColors(),
+                            colors = adminGlassFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -174,7 +199,7 @@ fun AdminLoginScreen(
                             singleLine = true,
                             visualTransformation = if (showPass) VisualTransformation.None else PasswordVisualTransformation(),
                             shape = RoundedCornerShape(16.dp),
-                            colors = adminTextFieldColors(),
+                            colors = adminGlassFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -182,8 +207,15 @@ fun AdminLoginScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp)
+                                .pressBounce(enabled = !isLoading)
+                                .shadow(14.dp, RoundedCornerShape(50), ambientColor = Color.White.copy(alpha = 0.25f))
                                 .clip(RoundedCornerShape(50))
-                                .background(Color.White)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(Color.White, Color(0xFFE6F4FF), Color.White)
+                                    )
+                                )
+                                .border(1.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(50))
                                 .clickable(enabled = !isLoading) {
                                     if (username.isBlank() || password.isBlank()) {
                                         Toast.makeText(context, "Login va parolni kiriting", Toast.LENGTH_SHORT).show()
@@ -214,7 +246,7 @@ fun AdminLoginScreen(
                             if (isLoading) {
                                 CircularProgressIndicator(color = Color.Black, strokeWidth = 2.2.dp, modifier = Modifier.size(20.dp))
                             } else {
-                                Text("Davom etish", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Davom etish", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     } else {
@@ -229,11 +261,11 @@ fun AdminLoginScreen(
                             value = twoFaCode,
                             onValueChange = { twoFaCode = it.filter { ch -> ch.isDigit() }.take(6) },
                             placeholder = { Text("123456", color = TextMuted, fontSize = 16.sp) },
-                            leadingIcon = { Icon(Icons.Default.Key, null, tint = TextSecondary, modifier = Modifier.size(19.dp)) },
+                            leadingIcon = { Icon(Icons.Default.Key, null, tint = AccentCyan, modifier = Modifier.size(19.dp)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             shape = RoundedCornerShape(16.dp),
-                            colors = adminTextFieldColors(),
+                            colors = adminGlassFieldColors(),
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -241,8 +273,14 @@ fun AdminLoginScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(52.dp)
+                                .pressBounce(enabled = !isLoading && twoFaCode.length == 6)
+                                .shadow(14.dp, RoundedCornerShape(50), ambientColor = Color.White.copy(alpha = 0.25f))
                                 .clip(RoundedCornerShape(50))
-                                .background(Color.White)
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(Color.White, Color(0xFFE6F4FF), Color.White)
+                                    )
+                                )
                                 .clickable(enabled = !isLoading && twoFaCode.length == 6) {
                                     scope.launch {
                                         isLoading = true
@@ -270,46 +308,56 @@ fun AdminLoginScreen(
                             if (isLoading) {
                                 CircularProgressIndicator(color = Color.Black, strokeWidth = 2.2.dp, modifier = Modifier.size(20.dp))
                             } else {
-                                Text("Tasdiqlash va Kirish", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Tasdiqlash va Kirish", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                             }
                         }
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (resendCooldown > 0) "Qayta yuborish (${resendCooldown}s)" else "Kodni qayta yuborish",
-                                color = if (resendCooldown > 0) TextMuted else TextPrimary,
-                                fontSize = 12.5.sp,
-                                modifier = Modifier.clickable(enabled = resendCooldown == 0 && !isLoading) {
-                                    scope.launch {
-                                        isLoading = true
-                                        try {
-                                            val r = AdminApi.resend2fa(tempToken)
-                                            if (r.ok) {
-                                                resendCooldown = 45
-                                                Toast.makeText(context, "Kod qayta yuborildi", Toast.LENGTH_SHORT).show()
-                                            } else {
-                                                Toast.makeText(context, r.error ?: "Xatolik", Toast.LENGTH_SHORT).show()
+                            Box(
+                                modifier = Modifier
+                                    .liquidGlassPill(glassAlpha = 0.08f, borderAlpha = 0.22f)
+                                    .clickable(enabled = resendCooldown == 0 && !isLoading) {
+                                        scope.launch {
+                                            isLoading = true
+                                            try {
+                                                val r = AdminApi.resend2fa(tempToken)
+                                                if (r.ok) {
+                                                    resendCooldown = 45
+                                                    Toast.makeText(context, "Kod qayta yuborildi", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, r.error ?: "Xatolik", Toast.LENGTH_SHORT).show()
+                                                }
+                                            } catch (_: Exception) {
+                                                Toast.makeText(context, "Aloqa xatosi", Toast.LENGTH_SHORT).show()
+                                            } finally {
+                                                isLoading = false
                                             }
-                                        } catch (_: Exception) {
-                                            Toast.makeText(context, "Aloqa xatosi", Toast.LENGTH_SHORT).show()
-                                        } finally {
-                                            isLoading = false
                                         }
                                     }
-                                }
-                            )
-                            Text(
-                                text = "← Ortga",
-                                color = TextSecondary,
-                                fontSize = 12.5.sp,
-                                modifier = Modifier.clickable {
-                                    step = 1
-                                    twoFaCode = ""
-                                }
-                            )
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text(
+                                    text = if (resendCooldown > 0) "Qayta yuborish (${resendCooldown}s)" else "Kodni qayta yuborish",
+                                    color = if (resendCooldown > 0) TextMuted else TextPrimary,
+                                    fontSize = 12.sp
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .liquidGlassPill(glassAlpha = 0.08f, borderAlpha = 0.22f)
+                                    .clickable {
+                                        step = 1
+                                        twoFaCode = ""
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                            ) {
+                                Text("← Ortga", color = TextSecondary, fontSize = 12.sp)
+                            }
                         }
                     }
                 }
@@ -319,14 +367,14 @@ fun AdminLoginScreen(
 }
 
 @Composable
-private fun adminTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Color(0x88FFFFFF),
-    unfocusedBorderColor = BorderSubtle,
-    focusedContainerColor = BgCardElevated,
-    unfocusedContainerColor = Color(0xFF141416),
+private fun adminGlassFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Color(0x99FFFFFF),
+    unfocusedBorderColor = Color(0x2EFFFFFF),
+    focusedContainerColor = Color(0x73151B2C),
+    unfocusedContainerColor = Color(0x520D111C),
     focusedTextColor = TextPrimary,
     unfocusedTextColor = TextPrimary,
-    cursorColor = Color.White
+    cursorColor = AccentCyan
 )
 
 @Composable
@@ -384,7 +432,8 @@ private fun AdminParticleField(modifier: Modifier = Modifier) {
             val alpha = ((0.9f - scatter * 0.35f) * (1f - max(0f, r - 0.92f) * 1.2f).coerceAtLeast(0.15f)).coerceIn(0.12f, 0.95f)
             val dx = cos(angle) * dash * 0.5f
             val dy = sin(angle) * dash * 0.5f
-            drawLine(Color.White.copy(alpha = alpha), Offset(px - dx, py - dy), Offset(px + dx, py + dy), 2.4f, StrokeCap.Round)
+            val tint = if (p.rand > 0.72f) AccentCyan else Color.White
+            drawLine(tint.copy(alpha = alpha), Offset(px - dx, py - dy), Offset(px + dx, py + dy), 2.4f, StrokeCap.Round)
         }
     }
 }

@@ -5,15 +5,17 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-val BgBlack = Color(0xFF000000)
-val BgCard = Color(0xFF111113)
-val BgCardElevated = Color(0xFF18181B)
-val BorderSubtle = Color(0x18FFFFFF)
+val BgBlack = Color(0xFF05070D)
+val BgCard = Color(0x99101420)
+val BgCardElevated = Color(0xB3171C2B)
+val BorderSubtle = Color(0x2EFFFFFF)
+val BorderStrong = Color(0x52FFFFFF)
 val TextPrimary = Color(0xFFFFFFFF)
-val TextSecondary = Color(0xFF9A9AA2)
-val TextMuted = Color(0xFF63636A)
+val TextSecondary = Color(0xFFB4B9C9)
+val TextMuted = Color(0xFF757C91)
 val AccentWhite = Color(0xFFFFFFFF)
 val AccentEmerald = Color(0xFF22C55E)
+val AccentCyan = Color(0xFF38BDF8)
 val AccentBlue = Color(0xFF3B82F6)
 val AccentViolet = Color(0xFF8B5CF6)
 val AccentAmber = Color(0xFFF59E0B)

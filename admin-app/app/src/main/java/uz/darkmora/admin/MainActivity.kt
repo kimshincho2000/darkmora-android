@@ -3,7 +3,12 @@ package uz.darkmora.admin
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
@@ -14,9 +19,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.view.WindowCompat
 import uz.darkmora.admin.data.AdminSessionManager
 import uz.darkmora.admin.network.AdminApi
+import uz.darkmora.admin.ui.components.AdminIntroOverlay
+import uz.darkmora.admin.ui.components.LiquidAuroraBackground
 import uz.darkmora.admin.ui.screens.AdminLoginScreen
 import uz.darkmora.admin.ui.screens.AdminMainScreen
-import uz.darkmora.admin.ui.theme.BgBlack
 import uz.darkmora.admin.ui.theme.DarkMoraAdminTheme
 
 class MainActivity : ComponentActivity() {
@@ -30,6 +36,7 @@ class MainActivity : ComponentActivity() {
                 var token by remember { mutableStateOf(session.getToken()) }
                 var label by remember { mutableStateOf(session.getLabel()) }
                 var checking by remember { mutableStateOf(token != null) }
+                var showIntro by remember { mutableStateOf(true) }
 
                 LaunchedEffect(Unit) {
                     val saved = session.getToken()
@@ -50,33 +57,50 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                when {
-                    checking -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize().background(BgBlack),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = Color.White)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    LiquidAuroraBackground()
+
+                    AnimatedContent(
+                        targetState = Triple(checking, token != null, token ?: ""),
+                        transitionSpec = {
+                            (fadeIn(tween(340)) + scaleIn(initialScale = 0.97f, animationSpec = tween(340))) togetherWith
+                                fadeOut(tween(240))
+                        },
+                        label = "admin_root_nav"
+                    ) { (isChecking, isAuthed, tok) ->
+                        when {
+                            isChecking -> {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(color = Color.White)
+                                }
+                            }
+                            !isAuthed -> {
+                                AdminLoginScreen(
+                                    onAuthSuccess = { newToken, email, newLabel ->
+                                        session.saveToken(newToken, email, newLabel)
+                                        label = newLabel
+                                        token = newToken
+                                    }
+                                )
+                            }
+                            else -> {
+                                AdminMainScreen(
+                                    adminToken = tok,
+                                    adminLabel = label,
+                                    onLogout = {
+                                        session.clear()
+                                        token = null
+                                    }
+                                )
+                            }
                         }
                     }
-                    token == null -> {
-                        AdminLoginScreen(
-                            onAuthSuccess = { newToken, email, newLabel ->
-                                session.saveToken(newToken, email, newLabel)
-                                label = newLabel
-                                token = newToken
-                            }
-                        )
-                    }
-                    else -> {
-                        AdminMainScreen(
-                            adminToken = token!!,
-                            adminLabel = label,
-                            onLogout = {
-                                session.clear()
-                                token = null
-                            }
-                        )
+
+                    if (showIntro) {
+                        AdminIntroOverlay(onFinished = { showIntro = false })
                     }
                 }
             }
