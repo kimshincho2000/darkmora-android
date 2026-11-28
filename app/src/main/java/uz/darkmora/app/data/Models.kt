@@ -246,16 +246,32 @@ data class W2gRoomInfo(
     @SerializedName("updated_at") val updatedAt: Double = 0.0
 )
 
+data class W2gMemberItem(
+    @SerializedName("client_id") val clientId: String = "",
+    val name: String = "",
+    val username: String = "",
+    val avatar: String = "",
+    @SerializedName("is_host") val isHost: Boolean = false
+)
+
 data class W2gMessageItem(
     val id: Int = 0,
+    @SerializedName("client_id") val clientId: String = "",
     val name: String = "",
+    val username: String = "",
+    val avatar: String = "",
     val text: String = "",
-    @SerializedName("is_reaction") val isReaction: Int = 0
+    @SerializedName("is_reaction") val isReaction: Int = 0,
+    @SerializedName("msg_type") val msgType: String = "text",
+    @SerializedName("audio_url") val audioUrl: String = "",
+    val duration: Double = 0.0,
+    @SerializedName("created_at") val createdAt: Long = 0L
 )
 
 data class W2gStateResponse(
     val ok: Boolean = false,
     val room: W2gRoomInfo? = null,
+    val members: List<W2gMemberItem>? = emptyList(),
     val messages: List<W2gMessageItem>? = emptyList(),
     val error: String? = null
 )

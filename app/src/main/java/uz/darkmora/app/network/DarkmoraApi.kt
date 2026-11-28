@@ -302,7 +302,9 @@ object DarkmoraApi {
         currentTime: Double,
         isPlaying: Boolean,
         clientId: String,
-        hostName: String
+        hostName: String,
+        username: String = "",
+        avatar: String = ""
     ): W2gCreateResponse = withContext(Dispatchers.IO) {
         val payload = mapOf(
             "slug" to slug,
@@ -311,7 +313,9 @@ object DarkmoraApi {
             "current_time" to currentTime,
             "is_playing" to isPlaying,
             "client_id" to clientId,
-            "host_name" to hostName
+            "host_name" to hostName,
+            "username" to username,
+            "avatar" to avatar
         )
         val req = Request.Builder()
             .url("$WEB_API_URL?action=w2g_create")
@@ -320,9 +324,19 @@ object DarkmoraApi {
         executeJson(req)
     }
 
-    suspend fun w2gState(room: String, clientId: String, name: String, afterId: Int = 0): W2gStateResponse = withContext(Dispatchers.IO) {
+    suspend fun w2gState(
+        room: String,
+        clientId: String,
+        name: String,
+        afterId: Int = 0,
+        username: String = "",
+        avatar: String = ""
+    ): W2gStateResponse = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url("$WEB_API_URL?action=w2g_state&room=${enc(room)}&client_id=${enc(clientId)}&name=${enc(name)}&after_id=$afterId")
+            .url(
+                "$WEB_API_URL?action=w2g_state&room=${enc(room)}&client_id=${enc(clientId)}" +
+                    "&name=${enc(name)}&username=${enc(username)}&avatar=${enc(avatar)}&after_id=$afterId"
+            )
             .build()
         executeJson(req)
     }
@@ -343,12 +357,22 @@ object DarkmoraApi {
         } catch (_: Exception) {}
     }
 
-    suspend fun w2gChat(room: String, clientId: String, name: String, text: String, isReaction: Boolean = false) = withContext(Dispatchers.IO) {
+    suspend fun w2gChat(
+        room: String,
+        clientId: String,
+        name: String,
+        text: String,
+        isReaction: Boolean = false,
+        username: String = "",
+        avatar: String = ""
+    ) = withContext(Dispatchers.IO) {
         try {
             val payload = mapOf(
                 "room" to room,
                 "client_id" to clientId,
                 "name" to name,
+                "username" to username,
+                "avatar" to avatar,
                 "text" to text,
                 "is_reaction" to if (isReaction) 1 else 0
             )
@@ -358,5 +382,36 @@ object DarkmoraApi {
                 .build()
             client.newCall(req).execute().close()
         } catch (_: Exception) {}
+    }
+
+    suspend fun w2gVoice(
+        room: String,
+        clientId: String,
+        name: String,
+        audioB64: String,
+        ext: String = "m4a",
+        duration: Double = 2.0,
+        username: String = "",
+        avatar: String = ""
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val payload = mapOf(
+                "room" to room,
+                "client_id" to clientId,
+                "name" to name,
+                "username" to username,
+                "avatar" to avatar,
+                "audio_b64" to audioB64,
+                "ext" to ext,
+                "duration" to duration
+            )
+            val req = Request.Builder()
+                .url("$WEB_API_URL?action=w2g_voice")
+                .post(gson.toJson(payload).toRequestBody(JSON_MEDIA))
+                .build()
+            client.newCall(req).execute().use { it.isSuccessful }
+        } catch (_: Exception) {
+            false
+        }
     }
 }

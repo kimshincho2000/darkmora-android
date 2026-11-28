@@ -1,13 +1,17 @@
 package uz.darkmora.app.ui.screens
 
+import android.Manifest
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.graphics.Paint as AndroidPaint
 import android.graphics.RuntimeShader
 import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -17,7 +21,10 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -93,10 +100,13 @@ import uz.darkmora.app.cast.TvCastState
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.data.Episode
 import uz.darkmora.app.data.UserSessionManager
+import uz.darkmora.app.data.W2gMemberItem
+import uz.darkmora.app.data.W2gMessageItem
 import uz.darkmora.app.network.DarkmoraApi
 import uz.darkmora.app.ui.components.bounceClick
 import uz.darkmora.app.ui.theme.*
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.InputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -236,12 +246,132 @@ fun PlayerScreen(
     var skipRecap by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
     val w2gClientId = remember { "and_" + (System.currentTimeMillis() % 1000000L).toString(36) }
-    val w2gUserName = remember { sessionManager.getUser()?.getEffectiveName() ?: "Mehmon" }
+    val currentUserProfile = remember { sessionManager.getUser() }
+    val w2gUserName = remember { currentUserProfile?.getEffectiveName() ?: "Mehmon" }
+    val w2gUsername = remember { currentUserProfile?.username ?: "" }
+    val w2gUserAvatar = remember { currentUserProfile?.photoUrl ?: "" }
     var w2gRoomCode by remember { mutableStateOf<String?>(null) }
     var w2gShareUrl by remember { mutableStateOf("") }
     var w2gViewers by remember { mutableIntStateOf(1) }
     var w2gJoinInput by remember { mutableStateOf("") }
+    var w2gChatInput by remember { mutableStateOf("") }
     var w2gLastUpdated by remember { mutableDoubleStateOf(0.0) }
+    var w2gLastMsgId by remember { mutableIntStateOf(0) }
+    var w2gMembers by remember { mutableStateOf<List<W2gMemberItem>>(emptyList()) }
+    var w2gMessages by remember { mutableStateOf<List<W2gMessageItem>>(emptyList()) }
+    var w2gSelectedMember by remember { mutableStateOf<W2gMemberItem?>(null) }
+    var w2gFloatBanner by remember { mutableStateOf<String?>(null) }
+    var w2gVoiceAutoPlay by remember { mutableStateOf(true) }
+    var w2gIsRecording by remember { mutableStateOf(false) }
+    var w2gRecSeconds by remember { mutableIntStateOf(0) }
+    val w2gRecorderRef = remember { mutableStateOf<MediaRecorder?>(null) }
+    val w2gRecFileRef = remember { mutableStateOf<File?>(null) }
+    val w2gVoicePlayerRef = remember { mutableStateOf<MediaPlayer?>(null) }
+
+    fun playW2gVoice(url: String) {
+        if (url.isBlank()) return
+        try {
+            w2gVoicePlayerRef.value?.let {
+                try { it.stop() } catch (_: Exception) {}
+                try { it.release() } catch (_: Exception) {}
+            }
+            val mp = MediaPlayer().apply {
+                setDataSource(url)
+                setOnPreparedListener { it.start() }
+                setOnCompletionListener {
+                    try { it.release() } catch (_: Exception) {}
+                }
+                setOnErrorListener { p, _, _ ->
+                    try { p.release() } catch (_: Exception) {}
+                    true
+                }
+                prepareAsync()
+            }
+            w2gVoicePlayerRef.value = mp
+        } catch (_: Exception) {}
+    }
+
+    fun stopAndSendW2gVoice() {
+        val rec = w2gRecorderRef.value ?: return
+        val outFile = w2gRecFileRef.value
+        val durSec = max(1, w2gRecSeconds).toDouble()
+        val room = w2gRoomCode
+        w2gRecorderRef.value = null
+        w2gIsRecording = false
+        w2gRecSeconds = 0
+        try { rec.stop() } catch (_: Exception) {}
+        try { rec.release() } catch (_: Exception) {}
+        if (room != null && outFile != null && outFile.exists() && outFile.length() > 300) {
+            scope.launch {
+                val b64 = withContext(Dispatchers.IO) {
+                    Base64.encodeToString(outFile.readBytes(), Base64.NO_WRAP)
+                }
+                val ok = DarkmoraApi.w2gVoice(
+                    room = room,
+                    clientId = w2gClientId,
+                    name = w2gUserName,
+                    audioB64 = b64,
+                    ext = "m4a",
+                    duration = durSec,
+                    username = w2gUsername,
+                    avatar = w2gUserAvatar
+                )
+                try { outFile.delete() } catch (_: Exception) {}
+                if (ok) Toast.makeText(context, "🎙️ Ovozli xabar yuborildi", Toast.LENGTH_SHORT).show()
+                else Toast.makeText(context, "Ovoz yuborishda xatolik", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun startW2gVoiceRecording() {
+        try {
+            val outFile = File(context.cacheDir, "w2g_voice_${System.currentTimeMillis()}.m4a")
+            val rec = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                MediaRecorder(context)
+            } else {
+                @Suppress("DEPRECATION")
+                MediaRecorder()
+            }
+            rec.setAudioSource(MediaRecorder.AudioSource.MIC)
+            rec.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            rec.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            rec.setAudioEncodingBitRate(32000)
+            rec.setAudioSamplingRate(22050)
+            rec.setOutputFile(outFile.absolutePath)
+            rec.prepare()
+            rec.start()
+            w2gRecFileRef.value = outFile
+            w2gRecorderRef.value = rec
+            w2gRecSeconds = 0
+            w2gIsRecording = true
+        } catch (_: Exception) {
+            w2gIsRecording = false
+            Toast.makeText(context, "Mikrofonni ishga tushirib bo'lmadi", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val micPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) startW2gVoiceRecording()
+        else Toast.makeText(context, "Ovozli chat uchun mikrofon ruxsati kerak", Toast.LENGTH_SHORT).show()
+    }
+
+    LaunchedEffect(w2gIsRecording) {
+        if (!w2gIsRecording) return@LaunchedEffect
+        while (w2gIsRecording && w2gRecSeconds < 15) {
+            delay(1000L)
+            w2gRecSeconds++
+        }
+        if (w2gIsRecording) stopAndSendW2gVoice()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try { w2gRecorderRef.value?.release() } catch (_: Exception) {}
+            try { w2gVoicePlayerRef.value?.release() } catch (_: Exception) {}
+        }
+    }
 
     LaunchedEffect(animeDetail?.malId, currentEpNum) {
         skipOp = null
@@ -1090,15 +1220,26 @@ fun PlayerScreen(
             }
         }
 
-        // Watch2Gether Live Sync Loop
+        // Watch2Gether Live Sync + Chat + Voice + Members Loop
         LaunchedEffect(w2gRoomCode) {
             val code = w2gRoomCode ?: return@LaunchedEffect
+            w2gLastMsgId = 0
+            w2gMessages = emptyList()
+            w2gMembers = emptyList()
             while (w2gRoomCode == code) {
                 try {
-                    val st = DarkmoraApi.w2gState(code, w2gClientId, w2gUserName, 0)
+                    val st = DarkmoraApi.w2gState(
+                        room = code,
+                        clientId = w2gClientId,
+                        name = w2gUserName,
+                        afterId = w2gLastMsgId,
+                        username = w2gUsername,
+                        avatar = w2gUserAvatar
+                    )
                     if (st.ok && st.room != null) {
                         val rm = st.room
                         w2gViewers = rm.viewers
+                        st.members?.let { if (it.isNotEmpty()) w2gMembers = it }
                         if (rm.updatedAt > w2gLastUpdated + 0.05) {
                             w2gLastUpdated = rm.updatedAt
                             val drift = kotlin.math.abs((exoPlayer.currentPosition / 1000.0) - rm.currentTime)
@@ -1108,31 +1249,81 @@ fun PlayerScreen(
                             if (rm.isPlaying && !exoPlayer.isPlaying) exoPlayer.play()
                             else if (!rm.isPlaying && exoPlayer.isPlaying) exoPlayer.pause()
                         }
+                        val incoming = st.messages.orEmpty()
+                        if (incoming.isNotEmpty()) {
+                            val hadBefore = w2gLastMsgId > 0
+                            val updated = (w2gMessages + incoming).distinctBy { it.id }.takeLast(35)
+                            w2gMessages = updated
+                            val maxId = incoming.maxOfOrNull { it.id } ?: w2gLastMsgId
+                            if (maxId > w2gLastMsgId) w2gLastMsgId = maxId
+                            if (hadBefore) {
+                                val lastMsg = incoming.last()
+                                w2gFloatBanner = if (lastMsg.isReaction == 1) "${lastMsg.name}: ${lastMsg.text}" else "${lastMsg.name}: ${lastMsg.text}"
+                                if (lastMsg.msgType == "voice" && lastMsg.audioUrl.isNotBlank() && lastMsg.clientId != w2gClientId && w2gVoiceAutoPlay) {
+                                    playW2gVoice(lastMsg.audioUrl)
+                                }
+                            }
+                        }
                     }
                 } catch (_: Exception) {}
-                delay(1800L)
+                delay(1600L)
             }
         }
 
-        // 4. Interactive Liquid Glass Popover Card for [Info / InSight / Continue Watching / TV Cast / Audio / Speed]
+        // Auto-hide live W2G floating message banner
+        LaunchedEffect(w2gFloatBanner) {
+            if (w2gFloatBanner != null) {
+                delay(3200L)
+                w2gFloatBanner = null
+            }
+        }
+
+        // Floating Live W2G Message / Reaction Banner (visible even when chat panel is closed)
+        AnimatedVisibility(
+            visible = w2gFloatBanner != null && w2gRoomCode != null,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { -it / 2 },
+            exit = fadeOut(tween(220)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 64.dp, end = 24.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xCC121726))
+                    .border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(50))
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = w2gFloatBanner ?: "",
+                    color = Color.White,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        // 4. Interactive Liquid Glass Popover Card for [W2G Chat+Voice / Info / Continue Watching / TV Cast / Audio / Speed]
         AnimatedVisibility(
             visible = activeBottomSheet != null,
             enter = fadeIn(tween(180)) + slideInVertically(tween(220)) { it / 2 },
             exit = fadeOut(tween(150)) + slideOutVertically(tween(180)) { it / 2 },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 26.dp, vertical = 72.dp)
+                .padding(horizontal = 24.dp, vertical = 64.dp)
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 210.dp)
+                    .heightIn(max = if (activeBottomSheet == "w2g") 295.dp else 210.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xE6282624),
-                                Color(0xF2181715)
+                                Color(0xD8141A29),
+                                Color(0xEB0B0E17)
                             )
                         )
                     )
@@ -1141,23 +1332,65 @@ fun PlayerScreen(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {}
-                    .padding(18.dp)
+                    .padding(16.dp)
             ) {
                 when (activeBottomSheet) {
                     "w2g" -> {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text(
-                                text = if (w2gRoomCode != null) "🟢 Xona: $w2gRoomCode • 👥 $w2gViewers kishi" else "👥 ${tr("Birga ko'rish (Watch2Gether)", "Watch2Gether", "Смотреть вместе")}",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            // Header Row: Room Code + Voice Toggle + Share + Leave
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (w2gRoomCode != null) "🟢 $w2gRoomCode • 👥 $w2gViewers" else "👥 ${tr("Birga ko'rish (Watch2Gether)", "Watch2Gether", "Смотреть вместе")}",
+                                    color = Color.White,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (w2gRoomCode != null) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        GlassBottomPill(
+                                            text = if (w2gVoiceAutoPlay) "🔊 Ovoz: ON" else "🔇 Ovoz: OFF",
+                                            isSelected = w2gVoiceAutoPlay,
+                                            onClick = { w2gVoiceAutoPlay = !w2gVoiceAutoPlay }
+                                        )
+                                        GlassBottomPill(
+                                            text = "✈️ Ulashish",
+                                            isSelected = false,
+                                            onClick = {
+                                                val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_TEXT, "🎬 $animeBaseTitle ($currentEpNum-qism) ni DarkMora'da birga ko'ramiz!\nXona kodi: $w2gRoomCode\n$w2gShareUrl")
+                                                }
+                                                context.startActivity(Intent.createChooser(sendIntent, "Xonani ulashish"))
+                                            }
+                                        )
+                                        GlassBottomPill(
+                                            text = "Chiqish",
+                                            isSelected = false,
+                                            onClick = {
+                                                w2gRoomCode = null
+                                                w2gShareUrl = ""
+                                                w2gMembers = emptyList()
+                                                w2gMessages = emptyList()
+                                                w2gSelectedMember = null
+                                                activeBottomSheet = null
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
                             if (w2gRoomCode == null) {
+                                // Create room OR Join room by code
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     GlassBottomPill(
@@ -1173,7 +1406,9 @@ fun PlayerScreen(
                                                         currentTime = exoPlayer.currentPosition / 1000.0,
                                                         isPlaying = exoPlayer.isPlaying,
                                                         clientId = w2gClientId,
-                                                        hostName = w2gUserName
+                                                        hostName = w2gUserName,
+                                                        username = w2gUsername,
+                                                        avatar = w2gUserAvatar
                                                     )
                                                     if (res.ok && !res.code.isNullOrBlank()) {
                                                         w2gRoomCode = res.code
@@ -1186,44 +1421,314 @@ fun PlayerScreen(
                                             }
                                         }
                                     )
-                                }
-                            } else {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    GlassBottomPill(
-                                        text = "✈️ Ulashish",
-                                        isSelected = true,
-                                        onClick = {
-                                            val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                                type = "text/plain"
-                                                putExtra(Intent.EXTRA_TEXT, "🎬 $animeBaseTitle ($currentEpNum-qism) ni DarkMora'da birga ko'ramiz!\n$w2gShareUrl")
-                                            }
-                                            context.startActivity(Intent.createChooser(sendIntent, "Xonani ulashish"))
-                                        }
+                                    OutlinedTextField(
+                                        value = w2gJoinInput,
+                                        onValueChange = { w2gJoinInput = it.uppercase().take(8) },
+                                        placeholder = { Text("Xona kodi...", color = Color(0x88FFFFFF), fontSize = 12.sp) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(50),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Color(0xAAFFFFFF),
+                                            unfocusedBorderColor = Color(0x44FFFFFF),
+                                            focusedContainerColor = Color(0x22FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF),
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            cursorColor = Color.White
+                                        ),
+                                        modifier = Modifier.weight(1f).height(46.dp)
                                     )
                                     GlassBottomPill(
-                                        text = "🔄 Sinxronlash",
-                                        isSelected = false,
+                                        text = "Kirish",
+                                        isSelected = w2gJoinInput.length >= 4,
                                         onClick = {
-                                            w2gRoomCode?.let { rc ->
-                                                scope.launch {
-                                                    DarkmoraApi.w2gSync(rc, currentEpNum, exoPlayer.currentPosition / 1000.0, exoPlayer.isPlaying)
-                                                    Toast.makeText(context, "Barcha ishtirokchilar sinxronlandi", Toast.LENGTH_SHORT).show()
+                                            val code = w2gJoinInput.trim().uppercase()
+                                            if (code.length < 4) {
+                                                Toast.makeText(context, "Xona kodini kiriting", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                w2gRoomCode = code
+                                                w2gShareUrl = "https://d.darkmora.uz/#w2g/$code"
+                                                w2gJoinInput = ""
+                                                Toast.makeText(context, "Xonaga ulandiz: $code", Toast.LENGTH_SHORT).show()
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                // 1. Active Room Members Strip (User Profiles with Avatars & Online Dots)
+                                val displayMembers = w2gMembers.ifEmpty {
+                                    listOf(W2gMemberItem(w2gClientId, w2gUserName, w2gUsername, w2gUserAvatar, true))
+                                }
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    items(displayMembers) { member ->
+                                        val isSel = w2gSelectedMember?.clientId == member.clientId
+                                        Row(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(if (isSel) Color(0x3838BDF8) else Color(0x1EFFFFFF))
+                                                .border(
+                                                    1.dp,
+                                                    if (isSel) Color(0xAA38BDF8) else Color(0x33FFFFFF),
+                                                    RoundedCornerShape(50)
+                                                )
+                                                .clickable {
+                                                    w2gSelectedMember = if (isSel) null else member
+                                                }
+                                                .padding(start = 4.dp, end = 9.dp, top = 3.dp, bottom = 3.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (member.avatar.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = member.avatar,
+                                                    contentDescription = member.name,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.size(22.dp).clip(CircleShape)
+                                                )
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(22.dp)
+                                                        .clip(CircleShape)
+                                                        .background(Brush.linearGradient(listOf(Color(0xFF38BDF8), Color(0xFF8B5CF6)))),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Text(
+                                                        text = member.name.take(1).uppercase(),
+                                                        color = Color.White,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = (if (member.isHost) "👑 " else "") + member.name,
+                                                color = Color.White,
+                                                fontSize = 11.5.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 1
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(6.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF22C55E))
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Selected User Profile Mini Card
+                                w2gSelectedMember?.let { prof ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color(0x2838BDF8))
+                                            .border(0.8.dp, Color(0x5538BDF8), RoundedCornerShape(14.dp))
+                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = "👤 ${prof.name}" +
+                                                (if (prof.username.isNotBlank()) " (@${prof.username})" else "") +
+                                                (if (prof.isHost) " • 👑 Xona egasi" else " • 🟢 Onlayn"),
+                                            color = Color.White,
+                                            fontSize = 11.5.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            text = "✕",
+                                            color = Color(0xAAFFFFFF),
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.clickable { w2gSelectedMember = null }
+                                        )
+                                    }
+                                }
+
+                                // 2. Live Chat & Voice Messages Scrollable Area
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f, fill = false)
+                                        .heightIn(min = 66.dp, max = 112.dp)
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color(0x28000000))
+                                        .border(0.8.dp, Color(0x24FFFFFF), RoundedCornerShape(14.dp))
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    if (w2gMessages.isEmpty()) {
+                                        Text(
+                                            text = "Hali xabar yo'q — yozing yoki 🎙️ bosib gapiring!",
+                                            color = Color(0x99FFFFFF),
+                                            fontSize = 11.5.sp
+                                        )
+                                    } else {
+                                        w2gMessages.forEach { msg ->
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                if (msg.avatar.isNotBlank()) {
+                                                    AsyncImage(
+                                                        model = msg.avatar,
+                                                        contentDescription = msg.name,
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.size(20.dp).clip(CircleShape)
+                                                    )
+                                                } else {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(20.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0x33FFFFFF)),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Text(
+                                                            msg.name.take(1).uppercase(),
+                                                            color = Color.White,
+                                                            fontSize = 9.5.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                }
+                                                Text(
+                                                    text = "${msg.name}:",
+                                                    color = Color(0xFF7DD3FC),
+                                                    fontSize = 11.5.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                if (msg.msgType == "voice" && msg.audioUrl.isNotBlank()) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(50))
+                                                            .background(Color(0x4438BDF8))
+                                                            .border(0.8.dp, Color(0x8838BDF8), RoundedCornerShape(50))
+                                                            .clickable { playW2gVoice(msg.audioUrl) }
+                                                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "▶ 🎙️ ${max(1, msg.duration.toInt())}s",
+                                                            color = Color.White,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                } else {
+                                                    Text(
+                                                        text = msg.text,
+                                                        color = Color.White,
+                                                        fontSize = 12.sp,
+                                                        modifier = Modifier.weight(1f)
+                                                    )
                                                 }
                                             }
                                         }
-                                    )
-                                    GlassBottomPill(
-                                        text = "Chiqish",
-                                        isSelected = false,
-                                        onClick = {
-                                            w2gRoomCode = null
-                                            w2gShareUrl = ""
-                                            activeBottomSheet = null
+                                    }
+                                }
+
+                                // 3. Quick Reactions + Voice Record + Chat Input Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    // Mic button (Voice Chat)
+                                    Box(
+                                        modifier = Modifier
+                                            .height(42.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (w2gIsRecording) Color(0xDDF43F5E) else Color(0x2AFFFFFF))
+                                            .border(1.dp, if (w2gIsRecording) Color.White else Color(0x44FFFFFF), RoundedCornerShape(50))
+                                            .clickable {
+                                                if (w2gIsRecording) {
+                                                    stopAndSendW2gVoice()
+                                                } else {
+                                                    val hasPerm = ContextCompat.checkSelfPermission(
+                                                        context,
+                                                        Manifest.permission.RECORD_AUDIO
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    if (hasPerm) startW2gVoiceRecording()
+                                                    else micPermLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                }
+                                            }
+                                            .padding(horizontal = 12.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (w2gIsRecording) "⏹ ${w2gRecSeconds}s" else "🎙️",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    // Quick emoji reactions
+                                    listOf("🔥", "😂", "❤️").forEach { em ->
+                                        Box(
+                                            modifier = Modifier
+                                                .size(38.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0x1EFFFFFF))
+                                                .clickable {
+                                                    w2gRoomCode?.let { rc ->
+                                                        scope.launch {
+                                                            DarkmoraApi.w2gChat(rc, w2gClientId, w2gUserName, em, true, w2gUsername, w2gUserAvatar)
+                                                        }
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(em, fontSize = 15.sp)
                                         }
+                                    }
+
+                                    // Chat Text Input
+                                    OutlinedTextField(
+                                        value = w2gChatInput,
+                                        onValueChange = { w2gChatInput = it.take(180) },
+                                        placeholder = { Text("Xabar yozing...", color = Color(0x88FFFFFF), fontSize = 12.sp) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(50),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Color(0xAAFFFFFF),
+                                            unfocusedBorderColor = Color(0x44FFFFFF),
+                                            focusedContainerColor = Color(0x22FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF),
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            cursorColor = Color.White
+                                        ),
+                                        modifier = Modifier.weight(1f).height(46.dp)
                                     )
+
+                                    // Send Button
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White)
+                                            .clickable {
+                                                val txt = w2gChatInput.trim()
+                                                val rc = w2gRoomCode
+                                                if (txt.isNotEmpty() && rc != null) {
+                                                    w2gChatInput = ""
+                                                    scope.launch {
+                                                        DarkmoraApi.w2gChat(rc, w2gClientId, w2gUserName, txt, false, w2gUsername, w2gUserAvatar)
+                                                    }
+                                                }
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Send, "Yuborish", tint = Color.Black, modifier = Modifier.size(18.dp))
+                                    }
                                 }
                             }
                         }
