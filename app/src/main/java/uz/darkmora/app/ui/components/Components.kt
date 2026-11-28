@@ -5,6 +5,7 @@ package uz.darkmora.app.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,16 +30,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -48,83 +53,119 @@ import androidx.compose.ui.util.lerp
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import uz.darkmora.app.R
 import uz.darkmora.app.data.Anime
 import uz.darkmora.app.ui.theme.*
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
 
 // ============================================================================
-// 1. TENSEII-STYLE CINEMATIC CALLIGRAPHY INTRO OVERLAY (SPLASH ANIMATION)
+// 1. DUAL WHITE & BLACK FLUID SPIRAL -> DARKMORA LOGO INTRO (MATCHES d.darkmora.uz)
 // ============================================================================
+
+private fun easeInOutQuart(t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    return if (x < 0.5f) 8f * x * x * x * x else 1f - (-2f * x + 2f).pow(4) / 2f
+}
+
+private fun easeOutCubic(t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    return 1f - (1f - x).pow(3)
+}
+
+private fun easeOutBack(t: Float): Float {
+    val x = t.coerceIn(0f, 1f)
+    val c1 = 1.45f
+    val c3 = c1 + 1f
+    return 1f + c3 * (x - 1f).pow(3) + c1 * (x - 1f).pow(2)
+}
 
 @Composable
 fun IntroOverlay(
     onFinished: () -> Unit
 ) {
-    // 5 calligraphy strokes forming a stylized Torii / DarkMora emblem
-    val strokeProgress = remember { List(5) { Animatable(0f) } }
-    val titleAlpha = remember { Animatable(0f) }
-    val titleOffsetY = remember { Animatable(24f) }
-    val subtitleAlpha = remember { Animatable(0f) }
-    val overlayAlpha = remember { Animatable(1f) }
-    val glowPulse = remember { Animatable(0f) }
+    val timelineMs = remember { Animatable(0f) }
+    var dismissed by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        // Staggered calligraphy brush stroke drawing (just like Tenseii IntroOverlayKt)
-        strokeProgress.forEachIndexed { index, anim ->
-            launch {
-                delay(index * 110L)
-                anim.animateTo(
-                    targetValue = 1f,
-                    animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing)
-                )
-            }
+        timelineMs.animateTo(
+            targetValue = 2850f,
+            animationSpec = tween(durationMillis = 2850, easing = LinearEasing)
+        )
+        if (!dismissed) {
+            dismissed = true
+            onFinished()
         }
-        launch {
-            delay(250L)
-            glowPulse.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
-        }
-        delay(420L)
-        launch {
-            titleAlpha.animateTo(1f, tween(450, easing = FastOutSlowInEasing))
-        }
-        launch {
-            titleOffsetY.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow))
-        }
-        delay(180L)
-        subtitleAlpha.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
-        delay(650L)
-        overlayAlpha.animateTo(0f, tween(380, easing = FastOutSlowInEasing))
-        onFinished()
     }
 
+    val t = timelineMs.value
     val isDark = AppThemeState.isDark
-    val bg = if (isDark) Color(0xFF07080C) else Color(0xFFF9FAFB)
-    val primaryStroke = if (isDark) Color.White else Color(0xFF111827)
-    val accentStroke = PrimaryBlue
+    val bg = if (isDark) Color(0xFF05060A) else Color(0xFFF6F7FB)
+    val fgColor = if (isDark) Color.White else Color(0xFF0E1118)
+    val subColor = if (isDark) Color.White.copy(alpha = 0.52f) else Color(0xFF4B5563)
+
+    // Exit fade & subtle lift (2420..2850ms)
+    val exitProgress = ((t - 2420f) / 430f).coerceIn(0f, 1f)
+    val overlayAlpha = 1f - easeOutCubic(exitProgress)
+    val overlayScale = 1f + 0.04f * easeOutCubic(exitProgress)
+
+    // Logo reveal (1180..1620ms)
+    val logoAlpha = easeOutCubic(((t - 1180f) / 280f).coerceIn(0f, 1f))
+    val logoSettle = easeOutBack(((t - 1180f) / 440f).coerceIn(0f, 1f))
+    val logoScale = lerp(0.80f, 1.0f, logoSettle)
+    val logoRotation = lerp(-18f, 0f, easeOutCubic(((t - 1180f) / 400f).coerceIn(0f, 1f)))
+
+    // Glossy diagonal sheen across logo squircle (1440..1980ms)
+    val sheenProgress = ((t - 1440f) / 540f).coerceIn(0f, 1f)
+
+    // Title & subtitle glide up (1480..1940ms)
+    val titleP = easeOutCubic(((t - 1480f) / 420f).coerceIn(0f, 1f))
+    val subP = easeOutCubic(((t - 1640f) / 360f).coerceIn(0f, 1f))
+
+    // Ambient fusion glow
+    val glowRise = easeOutCubic(((t - 1050f) / 420f).coerceIn(0f, 1f))
+    val glowFade = 1f - ((t - 1650f) / 700f).coerceIn(0f, 1f)
+    val glowAlpha = (0.28f * glowRise * (0.45f + 0.55f * glowFade)).coerceIn(0f, 0.32f)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = overlayAlpha.value }
+            .graphicsLayer {
+                alpha = overlayAlpha
+                scaleX = overlayScale
+                scaleY = overlayScale
+            }
             .background(bg)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
-            ) { onFinished() },
+            ) {
+                if (!dismissed) {
+                    dismissed = true
+                    onFinished()
+                }
+            },
         contentAlignment = Alignment.Center
     ) {
-        // Subtle radial ambient glow behind emblem
+        // Subtle monochrome ambient glow at center
         Box(
             modifier = Modifier
-                .size(260.dp)
+                .size(280.dp)
                 .graphicsLayer {
-                    scaleX = 0.8f + 0.3f * glowPulse.value
-                    scaleY = 0.8f + 0.3f * glowPulse.value
-                    alpha = 0.25f * glowPulse.value
+                    val s = 0.75f + 0.35f * glowRise
+                    scaleX = s
+                    scaleY = s
+                    alpha = glowAlpha
                 }
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(PrimaryBlue, Color.Transparent)
+                        colors = listOf(
+                            if (isDark) Color.White else Color(0xFF1F2937),
+                            Color.Transparent
+                        )
                     ),
                     shape = CircleShape
                 )
@@ -134,97 +175,243 @@ fun IntroOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            // Animated Torii / Emblem Strokes Canvas
-            Canvas(
-                modifier = Modifier.size(116.dp)
+            // Stage box: Spiral ribbons + shockwaves + sparks + real DarkMora logo
+            Box(
+                modifier = Modifier.size(220.dp),
+                contentAlignment = Alignment.Center
             ) {
-                val w = size.width
-                val h = size.height
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cx = size.width / 2f
+                    val cy = size.height / 2f
+                    val maxR = size.minDimension * 0.42f
 
-                // Stroke 1: Top curved Kasagi beam
-                val p0 = strokeProgress[0].value
-                if (p0 > 0f) {
-                    val path1 = Path().apply {
-                        moveTo(w * 0.12f, h * 0.24f)
-                        quadraticBezierTo(
-                            w * 0.50f,
-                            h * 0.34f,
-                            w * (0.12f + 0.76f * p0),
-                            h * (0.24f + 0.0f * p0)
+                    // --- PHASE 1: DUAL WHITE & BLACK FLUID SPIRAL (0..1340ms) ---
+                    val spiralAlpha = 1f - ((t - 1080f) / 260f).coerceIn(0f, 1f)
+                    if (spiralAlpha > 0.005f) {
+                        val u = (t / 1300f).coerceIn(0f, 1f)
+                        val startAngle = (-PI * 0.65).toFloat()
+                        val totalSpin = (PI * 3.15).toFloat()
+                        val steps = 22
+                        val stepDt = 0.0155f
+
+                        fun spiralPos(uSample: Float, phaseOffset: Float): Offset {
+                            val e = easeInOutQuart(uSample)
+                            val r = maxR * (1f - e)
+                            val a = startAngle + e * totalSpin + phaseOffset
+                            return Offset(cx + cos(a) * r, cy + sin(a) * r)
+                        }
+
+                        // Draw Black ink ribbon first, then White silk ribbon on top
+                        val droplets = listOf(
+                            Pair(PI.toFloat(), false), // Black ink droplet
+                            Pair(0f, true)             // White silk droplet
+                        )
+
+                        for ((phaseOffset, isWhite) in droplets) {
+                            val headPos = spiralPos(u, phaseOffset)
+                            val headR = lerp(12.dp.toPx(), 7.5.dp.toPx(), easeInOutQuart(u))
+
+                            // Tapered fluid tail
+                            var prev = headPos
+                            for (i in 1..steps) {
+                                val uBack = (u - i * stepDt).coerceAtLeast(0f)
+                                if (uBack <= 0f && u < i * stepDt) break
+                                val curr = spiralPos(uBack, phaseOffset)
+                                val frac = 1f - (i.toFloat() / steps)
+                                val segWidth = (headR * 1.45f * frac * frac).coerceAtLeast(1.2.dp.toPx())
+                                val segAlpha = (frac * frac * 0.92f * spiralAlpha).coerceIn(0f, 1f)
+
+                                if (!isWhite) {
+                                    // Crisp rim behind black ink trail so it pops on dark bg
+                                    drawLine(
+                                        color = if (isDark) Color.White.copy(alpha = segAlpha * 0.42f)
+                                        else Color(0xFF94A3B8).copy(alpha = segAlpha * 0.35f),
+                                        start = prev,
+                                        end = curr,
+                                        strokeWidth = segWidth + 2.2.dp.toPx(),
+                                        cap = StrokeCap.Round
+                                    )
+                                    drawLine(
+                                        color = Color(0xFF0A0C12).copy(alpha = segAlpha),
+                                        start = prev,
+                                        end = curr,
+                                        strokeWidth = segWidth,
+                                        cap = StrokeCap.Round
+                                    )
+                                } else {
+                                    // Soft outer halo for white silk trail
+                                    drawLine(
+                                        color = Color.White.copy(alpha = segAlpha * 0.24f),
+                                        start = prev,
+                                        end = curr,
+                                        strokeWidth = segWidth + 5.dp.toPx(),
+                                        cap = StrokeCap.Round
+                                    )
+                                    drawLine(
+                                        color = Color.White.copy(alpha = segAlpha),
+                                        start = prev,
+                                        end = curr,
+                                        strokeWidth = segWidth,
+                                        cap = StrokeCap.Round
+                                    )
+                                }
+                                prev = curr
+                            }
+
+                            // Droplet head (teardrop / tomoe orb)
+                            val prevHead = spiralPos((u - 0.01f).coerceAtLeast(0f), phaseOffset)
+                            val tangentRad = kotlin.math.atan2(
+                                (headPos.y - prevHead.y).toDouble(),
+                                (headPos.x - prevHead.x).toDouble()
+                            ).toFloat()
+                            val tangentDeg = tangentRad * (180f / PI.toFloat())
+
+                            withTransform({
+                                translate(headPos.x, headPos.y)
+                                rotate(tangentDeg)
+                            }) {
+                                if (isWhite) {
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = 0.30f * spiralAlpha),
+                                        radius = headR * 1.75f,
+                                        center = Offset.Zero
+                                    )
+                                    drawOval(
+                                        color = Color.White.copy(alpha = spiralAlpha),
+                                        topLeft = Offset(-headR * 1.15f, -headR * 0.92f),
+                                        size = Size(headR * 2.3f, headR * 1.84f)
+                                    )
+                                } else {
+                                    drawCircle(
+                                        color = (if (isDark) Color.White else Color(0xFF64748B))
+                                            .copy(alpha = 0.58f * spiralAlpha),
+                                        radius = headR * 1.18f,
+                                        center = Offset.Zero
+                                    )
+                                    drawOval(
+                                        color = Color(0xFF0A0C12).copy(alpha = spiralAlpha),
+                                        topLeft = Offset(-headR * 1.15f, -headR * 0.92f),
+                                        size = Size(headR * 2.3f, headR * 1.84f)
+                                    )
+                                    // Subtle glossy highlight on dark ink droplet
+                                    drawCircle(
+                                        color = Color.White.copy(alpha = 0.55f * spiralAlpha),
+                                        radius = headR * 0.24f,
+                                        center = Offset(headR * 0.32f, -headR * 0.28f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // --- PHASE 2: DOUBLE FUSION SHOCKWAVE + 8 SPARKS (1150..1880ms) ---
+                    val ring1P = ((t - 1150f) / 620f).coerceIn(0f, 1f)
+                    if (ring1P > 0f && ring1P < 1f) {
+                        val e = easeOutCubic(ring1P)
+                        drawCircle(
+                            color = fgColor.copy(alpha = (1f - e) * 0.65f),
+                            radius = lerp(18.dp.toPx(), 102.dp.toPx(), e),
+                            center = Offset(cx, cy),
+                            style = Stroke(width = lerp(3.5.dp.toPx(), 0.8.dp.toPx(), e))
                         )
                     }
-                    drawPath(
-                        path = path1,
-                        color = primaryStroke,
-                        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
-                    )
+                    val ring2P = ((t - 1260f) / 600f).coerceIn(0f, 1f)
+                    if (ring2P > 0f && ring2P < 1f) {
+                        val e = easeOutCubic(ring2P)
+                        drawCircle(
+                            color = fgColor.copy(alpha = (1f - e) * 0.36f),
+                            radius = lerp(12.dp.toPx(), 84.dp.toPx(), e),
+                            center = Offset(cx, cy),
+                            style = Stroke(width = lerp(2.dp.toPx(), 0.6.dp.toPx(), e))
+                        )
+                    }
+
+                    val sparkP = ((t - 1170f) / 640f).coerceIn(0f, 1f)
+                    if (sparkP > 0f && sparkP < 1f) {
+                        val e = easeOutCubic(sparkP)
+                        for (i in 0 until 8) {
+                            val angle = ((i * 45f + 18f) * PI / 180.0).toFloat()
+                            val dist = lerp(22.dp.toPx(), (76f + (i % 2) * 18f).dp.toPx(), e)
+                            val sx = cx + cos(angle) * dist
+                            val sy = cy + sin(angle) * dist
+                            val sr = lerp(3.2.dp.toPx(), 0.6.dp.toPx(), e)
+                            val sparkColor = if (i % 2 == 0) fgColor else Color(0xFF94A3B8)
+                            drawCircle(
+                                color = sparkColor.copy(alpha = (1f - e) * 0.85f),
+                                radius = sr,
+                                center = Offset(sx, sy)
+                            )
+                        }
+                    }
                 }
 
-                // Stroke 2: Second horizontal貫 (Nuki) beam
-                val p1 = strokeProgress[1].value
-                if (p1 > 0f) {
-                    drawLine(
-                        color = accentStroke,
-                        start = Offset(w * 0.20f, h * 0.42f),
-                        end = Offset(w * (0.20f + 0.60f * p1), h * 0.42f),
-                        strokeWidth = 4.5.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
+                // Real DarkMora Logo inside crisp rounded white squircle + diagonal glass sheen
+                if (logoAlpha > 0.005f) {
+                    val squircleShape = RoundedCornerShape(28.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(102.dp)
+                            .graphicsLayer {
+                                alpha = logoAlpha
+                                scaleX = logoScale
+                                scaleY = logoScale
+                                rotationZ = logoRotation
+                            }
+                            .shadow(
+                                elevation = if (isDark) 24.dp else 14.dp,
+                                shape = squircleShape,
+                                ambientColor = Color.White.copy(alpha = 0.25f),
+                                spotColor = if (isDark) Color.White.copy(alpha = 0.22f) else Color.Black.copy(alpha = 0.18f)
+                            )
+                            .clip(squircleShape)
+                            .background(Color.White)
+                            .border(
+                                width = 1.dp,
+                                color = if (isDark) Color.White.copy(alpha = 0.35f) else Color(0xFFE5E7EB),
+                                shape = squircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.darkmora_logo),
+                            contentDescription = "DarkMora",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
 
-                // Stroke 3: Left pillar
-                val p2 = strokeProgress[2].value
-                if (p2 > 0f) {
-                    drawLine(
-                        color = primaryStroke,
-                        start = Offset(w * 0.31f, h * 0.27f),
-                        end = Offset(w * (0.31f - 0.04f * p2), h * (0.27f + 0.56f * p2)),
-                        strokeWidth = 5.5.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-
-                // Stroke 4: Right pillar
-                val p3 = strokeProgress[3].value
-                if (p3 > 0f) {
-                    drawLine(
-                        color = primaryStroke,
-                        start = Offset(w * 0.69f, h * 0.27f),
-                        end = Offset(w * (0.69f + 0.04f * p3), h * (0.27f + 0.56f * p3)),
-                        strokeWidth = 5.5.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                }
-
-                // Stroke 5: Center vertical tablet (Gakuzuka) + glowing orb
-                val p4 = strokeProgress[4].value
-                if (p4 > 0f) {
-                    drawLine(
-                        color = accentStroke,
-                        start = Offset(w * 0.50f, h * 0.27f),
-                        end = Offset(w * 0.50f, h * (0.27f + 0.15f * p4)),
-                        strokeWidth = 4.dp.toPx(),
-                        cap = StrokeCap.Round
-                    )
-                    drawCircle(
-                        color = accentStroke,
-                        radius = 5.dp.toPx() * p4,
-                        center = Offset(w * 0.50f, h * 0.62f)
-                    )
+                        // Glossy diagonal sheen sweep across logo
+                        if (sheenProgress > 0f && sheenProgress < 1f) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val sweepX = lerp(-size.width * 0.9f, size.width * 1.9f, sheenProgress)
+                                val bandW = size.width * 0.45f
+                                drawRect(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Color.White.copy(alpha = 0.55f),
+                                            Color.Transparent
+                                        ),
+                                        start = Offset(sweepX - bandW, 0f),
+                                        end = Offset(sweepX + bandW, size.height)
+                                    )
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             Text(
                 text = "DARKMORA",
-                color = primaryStroke,
+                color = fgColor,
                 fontSize = 26.sp,
                 fontWeight = FontWeight.Black,
-                letterSpacing = 5.sp,
+                letterSpacing = lerp(8.5f, 5.2f, titleP).sp,
                 modifier = Modifier.graphicsLayer {
-                    alpha = titleAlpha.value
-                    translationY = titleOffsetY.value
+                    alpha = titleP
+                    translationY = lerp(24f, 0f, titleP)
                 }
             )
 
@@ -232,12 +419,13 @@ fun IntroOverlay(
 
             Text(
                 text = "ANIME STREAMING",
-                color = TextMuted,
+                color = subColor,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
-                letterSpacing = 3.sp,
+                letterSpacing = 3.2.sp,
                 modifier = Modifier.graphicsLayer {
-                    alpha = subtitleAlpha.value
+                    alpha = subP
+                    translationY = lerp(12f, 0f, subP)
                 }
             )
         }
